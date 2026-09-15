@@ -7,6 +7,8 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const http = require('http');   // fetch() cannot forge a Host header; the raw client can (rebinding probes below)
+const net = require('net');     // and only a raw socket can send NO Host header at all (http fills in the default)
 
 const HOST = '127.0.0.1';
 const INDEX = path.resolve(__dirname, '..', 'sidecar', 'index.js');
@@ -128,6 +130,40 @@ function extractBootToken(html) {
     });
     A.eq(sse.status, 200, 'browser EventSource flow can authenticate with token query');
     try { if (sse.body && sse.body.cancel) await sse.body.cancel(); } catch (_) {}
+
+    // HOST PIN ON EVERY REQUEST (DNS-rebinding defence). The static shell carries the launch token, so a page that
+    // rebinds an attacker's hostname to 127.0.0.1 must get 403 from EVERY route — shell, /shared/*, /workshop-run/*,
+    // the health probes — not only /api/*. Node's raw http client lets the test forge the Host header.
+    const rawGet = (route, host) => new Promise((resolve, reject) => {
+      const rq = http.request({ host: HOST, port, path: route, method: 'GET', headers: { Host: host } }, r => {
+        let body = ''; r.on('data', d => { body += d; }); r.on('end', () => resolve({ status: r.statusCode, body }));
+      });
+      rq.on('error', reject); rq.end();
+    });
+    for (const route of ['/', '/index.html', '/shared/specialties.js', '/workshop-run/agent/run1/index.html?token=' + encodeURIComponent(browserToken), '/api/health', '/health']) {
+      for (const host of ['evil.example', 'evil.example:' + port, '169.254.169.254', 'localhost.evil.example:' + port]) {
+        const r = await rawGet(route, host);
+        A.eq(r.status, 403, 'foreign Host ' + host + ' is refused on ' + route);
+        A.eq(r.body, 'forbidden host', 'the refusal on ' + route + ' is the Host pin, before any token/route logic');
+        A.ok(r.body.indexOf(browserToken) < 0, 'no token leaks to a foreign Host on ' + route);
+      }
+    }
+    // Node's http client substitutes the default loopback Host when handed an empty one, so the Host-less probe
+    // speaks raw HTTP/1.0 (which does not require Host) over a plain socket.
+    const noHost = await new Promise((resolve, reject) => {
+      const sock = net.connect({ host: HOST, port }, () => { sock.write('GET / HTTP/1.0\r\nConnection: close\r\n\r\n'); });
+      let data = ''; sock.setEncoding('utf8');
+      sock.on('data', d => { data += d; }); sock.on('error', reject);
+      sock.on('close', () => resolve({ status: Number((data.match(/^HTTP\/1\.[01] (\d{3})/) || [])[1] || 0), body: data.split('\r\n\r\n').slice(1).join('\r\n\r\n') }));
+    });
+    A.eq(noHost.status, 403, 'a request with no Host at all is refused');
+    A.ok(noHost.body.indexOf(browserToken) < 0, 'no token leaks to a Host-less request');
+    for (const host of ['127.0.0.1:' + port, 'localhost:' + port, '[::1]:' + port, '127.0.0.1', 'LOCALHOST:' + port]) {
+      A.eq((await rawGet('/', host)).status, 200, 'loopback Host ' + host + ' still serves the shell (the desktop shell sends a bare Host: 127.0.0.1)');
+    }
+    A.eq((await rawGet('/shared/specialties.js', '127.0.0.1:' + port)).status, 200, '/shared/* still serves on loopback');
+    A.eq((await rawGet('/api/health', 'localhost:' + port)).status, 200, '/api/health still answers on loopback');
+    A.ok(/window\.__STARNET_API_TOKEN__/.test((await rawGet('/', '127.0.0.1:' + port)).body), 'the loopback shell still carries its launch token');
   } finally {
     try { child.kill(); } catch (_) {}
     await sleep(150);

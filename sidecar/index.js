@@ -8854,6 +8854,14 @@ updatePreparation = makeUpdatePreparation({
 });
 
 const server = http.createServer((req, res) => {
+  // HOST PIN, FIRST, FOR EVERY REQUEST — the DNS-rebinding defence (apiauth.isAllowedHost). It used to guard only
+  // /api/* (rejectApi) and /v1 + /health (openai-compat): the static shell — which carries the per-launch token in
+  // window.__STARNET_API_TOKEN__ — plus /workshop-run/* and /shared/* answered ANY Host, so a page on an attacker's
+  // domain that rebinds to 127.0.0.1 could read index.html and lift the token. One check before any route,
+  // including the recovery shell below. Origin handling is unchanged (still /api-only). The desktop shell reaches
+  // the sidecar as http://127.0.0.1:<port> (src-tauri even sends a bare `Host: 127.0.0.1`), which passes;
+  // tauri.localhost is an ORIGIN, never the Host of a request to this server.
+  if (!isAllowedHost(req.headers.host)) { res.writeHead(403); return res.end('forbidden host'); }
   // Once an uncaught exception has made this process's in-memory state unprovable, the server becomes a recovery
   // shell. Static GET/HEAD keeps the already-installed UI reloadable; health + authenticated diagnostics explain
   // the fault. Every other API, external-harness, artifact and mutation surface fails closed with 503. This gate

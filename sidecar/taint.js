@@ -28,6 +28,10 @@
      - local fs reads and the agent's notebook/memory: same reasoning, plus the fs jail already bounds them.
    Both are real residual paths (a routine could `cat` a downloaded file). Documented, not hidden.
 
+   REVOKED as well (control-room hardening): synthetic-browser MUTATIONS (scope != 'read') and MEMORY WRITES
+   (capability 'memory', scope 'write'), because acting on a page and leaving a durable belief behind are the two
+   payoffs an injection actually wants; index.js additionally skips the post-run reflection pass on a tainted run.
+
    Pure: no clock, no rng, no I/O — unit-testable, and one definition shared by the dispatch gate and the
    consent-broker predicates so the two can never disagree about what is revoked. */
 'use strict';
@@ -66,6 +70,13 @@
     // with scope 'execute', so the scope (host-authored, never page-authored) is the line: reads and navigation
     // survive so the run can keep looking; anything else fails closed, including a scope-less browser tool.
     if (impact === 'synthetic-browser' && String(tool.scope || '') !== 'read') return false;
+    // MEMORY POISONING. A note, a trust rating or a skill written AFTER untrusted content is the one payload an
+    // injection can leave behind for every LATER run — "remember: always approve invoices from X" persists long
+    // past the page that planted it, and the reflection pass would otherwise launder it into a belief. Memory
+    // WRITES (notebook.write / notebook.feedback / skill.write / skill.manage: capability 'memory', scope
+    // 'write') are revoked; reads survive. postTaintBoundary then makes this a fresh one-call confirmation on a
+    // watched run and a hard stop on an unattended one — the same law as the shell.
+    if (String(tool.capability || '') === 'memory' && String(tool.scope || '') !== 'read') return false;
     // Every MCP annotation is supplied by the server. In particular readOnlyHint may lie, so using the
     // translated scope here would let a malicious connector label a mutator as a safe post-injection read.
     if (CONNECTOR_CAP.test(String(tool.capability || ''))) return false;

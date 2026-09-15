@@ -2432,6 +2432,11 @@ function auxReasoningEffort(provider, model) {
 
 // fire-and-forget; never throws. Uses its OWN abort signal (+ timeout) so the closing run stream can't kill it.
 async function runReflection(o) {
+  // TAINTED RUN = NO REFLECTION. Reflection auto-saves ordinary beliefs with no confirmation; on a run that read
+  // content the Commander did not author (web page, connector result, attachment) those "beliefs" may be the
+  // injection's payload, and a saved one is re-read as fact by every later run. The gate in runOnce already
+  // withholds the pass; this is the belt to that brace, so a caller can never reach the auto-save with taint set.
+  if (o && o.taintedBy) return;
   const { agentId, runId, messages, provider, model, cost } = o;
   const unmetered = !!(o && o.unmetered);
   const origin = String((o && o.origin) || 'commander');   // which surface formed these beliefs (memcore.originOf)
@@ -17501,7 +17506,10 @@ async function runOnce(o) {
   // cooldown comparisons are byte-for-byte the originals, so the settings-P1 source-locks still hold). A pass
   // becomes a budget CANDIDATE iff it would actually SPEND a model call this run-end — so an already-blocked pass
   // never eats a slot. Cortex M-mem.5b reflection · GROWTH Tier 1 study · NS-6 thread-mine — all ride isTask/done/salience.
-  const _gateReflect = !!(o.reflect && memoryConfig.reflectEnabled && isTask && _auxDone && reflectSalient(result.messages, o.recurring)
+  // `!execution.taintedBy()`: a run that read outside content never reflects — its dialogue may carry an
+  // injection's "facts", and reflection would auto-save them as beliefs (see runReflection). Nothing fires and
+  // no cooldown arms, so the agent's next clean run reflects as usual.
+  const _gateReflect = !!(o.reflect && !execution.taintedBy() && memoryConfig.reflectEnabled && isTask && _auxDone && reflectSalient(result.messages, o.recurring)
       && !reflectingNow.has(agentId) && (Date.now() - (lastReflectAt.get(agentId) || 0) >= memoryConfig.reflectCooldownMs));
   // failure-review: reflection's exact gate shape on the FAILURE side — o.reflect (real-work hosts only; delegated
   // workers stay off), the live config master-switch, the personalization PAUSE (checked here so a paused station
@@ -17551,7 +17559,7 @@ async function runOnce(o) {
   // so it re-qualifies next run.
   if (_auxSpend.has('reflection')) {
     reflectingNow.add(agentId);
-    runReflection({ agentId, runId, messages: result.messages.slice(), provider, model: _auxModel, reasoningEffort: _auxEffort, cost, unmetered: providerUnmetered, origin: memcore.originOf({ trigger: o.trigger, taskSource: o.taskSource }) }).catch(swallow('aux.reflection.envelope')).finally(() => { reflectingNow.delete(agentId); });
+    runReflection({ agentId, runId, messages: result.messages.slice(), provider, model: _auxModel, reasoningEffort: _auxEffort, cost, unmetered: providerUnmetered, taintedBy: execution.taintedBy(), origin: memcore.originOf({ trigger: o.trigger, taskSource: o.taskSource }) }).catch(swallow('aux.reflection.envelope')).finally(() => { reflectingNow.delete(agentId); });
   }
   if (_auxSpend.has('failure-review')) {
     failReviewingNow.add(agentId);

@@ -95,8 +95,36 @@ A.ok(!taint.allowedWhenTainted(MCP_READ), 'connector calls are blocked even when
 A.ok(!taint.allowedWhenTainted(UNKNOWN), 'unclassified external effects are blocked');
 A.ok(taint.allowedWhenTainted(WEB_READ), 'reading more web content survives');
 A.ok(taint.allowedWhenTainted(FS_READ) && taint.allowedWhenTainted(FS_WRITE), 'jailed file work survives');
-A.ok(taint.allowedWhenTainted(NOTEBOOK), 'memory writes survive');
 A.ok(taint.allowedWhenTainted(null), 'an unknown tool falls through to the ordinary unknown-tool answer');
+
+// ---- 4c. MEMORY POISONING: a belief written after untrusted content outlives the run that planted it ----
+{
+  const mem = (name, scope) => ({ name, capability: 'memory', scope, requiresConsent: false });
+  for (const w of [['notebook.write', 'write'], ['notebook.feedback', 'write'], ['skill.write', 'write'], ['skill.manage', 'write']])
+    A.ok(!taint.allowedWhenTainted(mem(w[0], w[1])), 'a tainted run loses ' + w[0]);
+  A.ok(!taint.allowedWhenTainted(NOTEBOOK), 'notebook.write is revoked (was: survived)');
+  for (const r of ['notebook.read', 'skill.list', 'skill.view'])
+    A.ok(taint.allowedWhenTainted(mem(r, 'read')), r + ' (a memory READ) survives');
+  A.ok(!taint.allowedWhenTainted({ name: 'notebook.write', capability: 'memory' }), 'a scope-less memory tool fails closed');
+  // the real tool definitions carry exactly the capability/scope the law keys on
+  const notebookSrc = fs.readFileSync(path.join(root, 'sidecar', 'tools', 'builtin', 'notebook.js'), 'utf8');
+  const skillsSrc = fs.readFileSync(path.join(root, 'sidecar', 'tools', 'builtin', 'skills.js'), 'utf8');
+  A.ok(/name: 'notebook\.write', capability: 'memory', scope: 'write'/.test(notebookSrc) && /name: 'notebook\.feedback', capability: 'memory', scope: 'write'/.test(notebookSrc), 'notebook write/feedback are memory:write');
+  A.ok(/name: 'skill\.write', capability: 'memory', scope: 'write'/.test(skillsSrc) && /name: 'skill\.manage', capability: 'memory', scope: 'write'/.test(skillsSrc), 'skill write/manage are memory:write');
+  // unattended: gone. Watched: the existing authorize path turns the revocation into a fresh ONE-CALL consent
+  // prompt (postTaintBoundary -> effectPrompt), never an auto-allow — notebook tools are requiresConsent:false
+  // in the ordinary path, so this boundary is the only ask they ever get.
+  A.eq(taint.postTaintBoundary(NOTEBOOK, { taintedBy: 'web_fetch', surface: 'autonomous', hasPrompt: false }),
+    { allow: false, needsConfirmation: false, oneShot: false }, 'an unattended tainted run cannot write memory');
+  A.eq(taint.postTaintBoundary(NOTEBOOK, { taintedBy: 'web_fetch', surface: 'autonomous', hasPrompt: true, decision: 'always' }),
+    { allow: false, needsConfirmation: false, oneShot: false }, 'an owner chat / routine cannot recover memory writes from a standing answer');
+  A.eq(taint.postTaintBoundary(NOTEBOOK, { taintedBy: 'web_fetch', surface: 'interactive', hasPrompt: true }),
+    { allow: false, needsConfirmation: true, oneShot: false }, 'a watched tainted run asks before the exact memory write');
+  A.eq(taint.postTaintBoundary(NOTEBOOK, { taintedBy: 'web_fetch', surface: 'interactive', hasPrompt: true, decision: 'once' }),
+    { allow: true, needsConfirmation: false, oneShot: true }, 'the confirmation is one-call');
+  A.eq(taint.postTaintBoundary(NOTEBOOK, { taintedBy: null, surface: 'autonomous', hasPrompt: false }),
+    { allow: true, needsConfirmation: false, oneShot: false }, 'a clean run keeps its notebook');
+}
 // an MCP tool with no explicit scope must fail SAFE toward read (translate.js defaults readOnly -> 'read')
 A.ok(!taint.allowedWhenTainted({ name: 'x', capability: 'mcp:z' }), 'a scope-less connector is still blocked');
 
@@ -173,6 +201,18 @@ A.eq(taint.postTaintBoundary(FS_WRITE, { taintedBy: 'web_fetch', surface: 'auton
   // enforcement must run BEFORE the tool executes
   A.ok(src.indexOf('let postTaint = revokedByTaint.boundary') < src.indexOf('r = await registry.dispatch(c, dctx)'),
     'the lockout is checked BEFORE dispatch, so a revoked power never executes');
+  // REFLECTION auto-saves ordinary beliefs with no confirmation (cron, night shift and channel runs all pass
+  // reflect:true). A tainted run must never reach that save: the aux gate withholds the pass AND runReflection
+  // refuses a tainted envelope, so neither path can launder injected "facts" into memory.
+  A.ok(/const _gateReflect = !!\(o\.reflect && !execution\.taintedBy\(\) &&/.test(src), 'the reflection gate is closed on a tainted run (no pass fires, no cooldown arms)');
+  A.ok(/taintedBy: execution\.taintedBy\(\), origin: memcore\.originOf/.test(src), 'the run hands its taint marker to runReflection');
+  const reflectStart = src.indexOf('async function runReflection(o)');
+  const shortCircuit = src.indexOf('if (o && o.taintedBy) return;', reflectStart);
+  const proposeAt = src.indexOf('const propose = async (prompt)', reflectStart);
+  A.ok(reflectStart > 0 && shortCircuit > reflectStart && proposeAt > 0 && shortCircuit < proposeAt,
+    'runReflection short-circuits on taint before any model call or write');
+  const highStakesSplit = src.indexOf('(highStakes(p.content) ? highStakesProps : normalProps)', reflectStart);
+  A.ok(highStakesSplit > shortCircuit, 'the auto-save split sits behind the taint short-circuit');
 }
 
 // ---- 6. poisoned documents and upstream agent output begin tainted ----

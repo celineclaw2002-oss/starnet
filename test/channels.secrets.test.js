@@ -408,7 +408,9 @@ const root = path.resolve(__dirname, '..');
     A.ok(/const r = persistChannelSecretsVerified\(obj\);[\s\S]{0,400}?return r\.ok;/.test(idx), 'saveChannelSecrets returns the proven ok bit');
     A.ok(/if \(!saveChannelSecrets\(channelSecrets\)\) \{ res\.writeHead\(500/.test(idx), 'the notify route surfaces a failed persist as 500 (the old guard was unreachable)');
     A.ok((idx.match(/purged: purge && persisted/g) || []).length >= 2, 'a FORGET/purge never claims `purged` without read-back proof (telegram + generic)');
-    A.ok((idx.match(/persisted: !!\(started && started\.secretsPersisted\)/g) || []).length >= 3, 'all three connect routes report the persist truth bit');
+    // every connect route (telegram/discord/generic) reports the persist truth bit through ONE shared helper
+    A.ok((idx.match(/ownerPairingOnConnect\((?:'telegram'|'discord'|id), started\)/g) || []).length >= 3, 'all three connect routes report the persist truth bit (via ownerPairingOnConnect)');
+    A.ok(/persisted: pairingRequired \? !!pairing\.persisted : !!\(started && started\.secretsPersisted\)/.test(idx), 'the shared connect helper carries the read-back-proven persist bit');
   }
 }
 

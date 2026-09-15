@@ -68,7 +68,7 @@ function resp(status, body, headers) {
     const okF = fakeFetch(() => resp(200, { id: '1' }));
     const transport = makeDiscordTransport({ fetch: okF, token: 'T', connectGateway, parkMs: 1, sleep: () => Promise.resolve() });
     // dropPending OFF so the first poll IS the delivery (the gateway doesn't replay history anyway).
-    const a = makeDiscordAdapter({ transport, onInbound: m => inbox.push(m), clock: { now: () => 1234 }, dropPendingOnConnect: false });
+    const a = makeDiscordAdapter({ transport, onInbound: m => inbox.push(m), clock: { now: () => 1234 }, dropPendingOnConnect: false, allowTrustOnFirstUse: true });
     await a.connect();
     for (let i = 0; i < 20 && !inbox.length; i++) await tick();
     A.eq(inbox.length, 1, 'end-to-end: one inbound delivered');
@@ -88,7 +88,7 @@ function resp(status, body, headers) {
     const transport = makeDiscordTransport({ fetch: fakeFetch(() => resp(200, { id: '1' })), token: 'T', connectGateway, parkMs: 1, sleep: () => Promise.resolve() });
     const a = makeDiscordAdapter({
       transport, onInbound: m => inbox.push(m), onOwnerClaim: u => claims.push(u),
-      clock: { now: () => 1 }, dropPendingOnConnect: false
+      clock: { now: () => 1 }, dropPendingOnConnect: false, allowTrustOnFirstUse: true   // legacy first-DM claim: explicit test-only opt-in (the host never sets it)
     });
     await a.connect();
     for (let i = 0; i < 20 && inbox.length < 2; i++) await tick();

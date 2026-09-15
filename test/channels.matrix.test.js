@@ -20,6 +20,12 @@ const jres = (status, body) => ({ ok: status >= 200 && status < 300, status, asy
     A.eq(normalize({ roomId: '!r:hs', event: ev({ content: { msgtype: 'm.image', url: 'mxc://x' } }), selfId: '' }), null, 'a non-text message delivers nothing');
     A.eq(normalize(null), null, 'malformed raw -> null');
     A.eq(MAX_MESSAGE_LENGTH, 4096, 'declared chunking limit');
+    // ROOM TYPING: only a 1:1 room (bot + one human) is a DM surface; a shared room is a GROUP (dropped unless
+    // allowlisted, like every other platform). An unknown member count keeps the owner-gated dm path.
+    A.eq(normalize({ roomId: '!r:hs', event: ev({}), selfId: '@bot:hs', joinedMembers: 2 }).message.chatType, 'dm', 'a two-member room is a DM');
+    A.eq(normalize({ roomId: '!r:hs', event: ev({}), selfId: '@bot:hs', joinedMembers: 3 }).message.chatType, 'group', 'a three-member room is a group');
+    A.eq(normalize({ roomId: '!r:hs', event: ev({}), selfId: '@bot:hs', joinedMembers: 40 }).message.chatType, 'group', 'a big room is a group');
+    A.eq(normalize({ roomId: '!r:hs', event: ev({}), selfId: '@bot:hs', joinedMembers: null }).message.chatType, 'dm', 'no summary from the homeserver -> owner-gated dm (never a silently deaf channel)');
   }
 
   // ---- B. transport: whoami once, first sync DISCARDED (backlog), since advances, send PUT shape ----
@@ -30,8 +36,9 @@ const jres = (status, body) => ({ ok: status >= 200 && status < 300, status, asy
     const fakeFetch = async (url, opts) => {
       calls.push({ url, method: (opts && opts.method) || 'GET', body: opts && opts.body });
       if (/\/account\/whoami$/.test(url)) return jres(200, { user_id: '@bot:hs' });
-      if (/\/sync\?timeout=0$/.test(url)) return jres(200, { next_batch: 's1', rooms: { join: { '!r:hs': { timeline: { events: [backlogEvent] } } } } });
-      if (/\/sync\?timeout=30000&since=s1$/.test(url)) return jres(200, { next_batch: 's2', rooms: { join: { '!r:hs': { timeline: { events: [liveEvent] } } } } });
+      // the initial sync carries every room's summary; the live sync carries one only when membership changed
+      if (/\/sync\?timeout=0$/.test(url)) return jres(200, { next_batch: 's1', rooms: { join: { '!r:hs': { summary: { 'm.joined_member_count': 2 }, timeline: { events: [backlogEvent] } }, '!big:hs': { summary: { 'm.joined_member_count': 5 }, timeline: { events: [] } } } } });
+      if (/\/sync\?timeout=30000&since=s1$/.test(url)) return jres(200, { next_batch: 's2', rooms: { join: { '!r:hs': { timeline: { events: [liveEvent] } }, '!big:hs': { timeline: { events: [liveEvent] } }, '!new:hs': { timeline: { events: [liveEvent] } } } } });
       if (/\/send\/m\.room\.message\//.test(url)) return jres(200, { event_id: '$sent' });
       return jres(404, { errcode: 'M_NOT_FOUND' });
     };
@@ -41,9 +48,11 @@ const jres = (status, body) => ({ ok: status >= 200 && status < 300, status, asy
     A.eq(first, [], 'the FIRST sync is discarded — a restart never replays the backlog');
     A.eq(t._internals.selfId, '@bot:hs', 'whoami resolved the self id once');
     const second = await t.getUpdates({ timeoutSec: 30 });
-    A.eq(second.length, 1, 'the live sync yields the fresh event');
+    A.eq(second.length, 3, 'the live sync yields the fresh events');
     A.eq(second[0].roomId, '!r:hs', 'raw update carries the room id');
     A.eq(second[0].selfId, '@bot:hs', 'raw update is annotated with selfId for the pure normalize');
+    A.eq(second.map(r => r.joinedMembers), [2, 5, null], 'member counts harvested from the discarded initial sync ride every raw update (unknown room -> null)');
+    A.eq(normalize(second[1]).message.chatType, 'group', 'a shared room reaches the adapter as a group, not an owner-gated dm');
     A.eq(t._internals.since, 's2', 'since advances per successful sync');
     const auth = calls.find(c => /whoami/.test(c.url));
     A.ok(!/tok/.test(auth.url), 'the access token never appears in a URL');

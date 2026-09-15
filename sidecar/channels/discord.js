@@ -55,6 +55,8 @@
       allowedChats: o.allowedChats,
       ownerUserId: o.ownerUserId,
       onOwnerClaim: o.onOwnerClaim,
+      ownerAdmission: o.ownerAdmission,           // the host's /pair enrollment hook (no trust-on-first-use)
+      allowTrustOnFirstUse: o.allowTrustOnFirstUse,
       onInbound: o.onInbound,
       onCallback: o.onCallback,
       onStatus: o.onStatus,

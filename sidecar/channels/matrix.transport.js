@@ -44,6 +44,10 @@
     let since = '';        // Matrix's own resume token — advances per successful sync
     let selfId = '';       // resolved once via /whoami; annotated onto every raw update
     let primed = false;    // has the discard-backlog initial sync run?
+    // roomId -> m.joined_member_count, harvested from every /sync room summary (the initial sync carries every
+    // joined room's; later syncs carry a summary only when membership changes). matrix.js uses it to tell a
+    // real 1:1 room (bot + one human) from a shared room, so the DM owner gate only ever admits a private chat.
+    const members = new Map();
 
     async function call(method, url, body, signal) {
       const res = await fetchImpl(url, { method: method, headers: HEADERS, body: body != null ? JSON.stringify(body) : undefined, signal: signal });
@@ -61,13 +65,23 @@
       return err;
     }
 
+    function harvestMembers(data) {
+      const rooms = (data && data.rooms && data.rooms.join) || {};
+      for (const roomId of Object.keys(rooms)) {
+        const n = rooms[roomId] && rooms[roomId].summary && rooms[roomId].summary['m.joined_member_count'];
+        if (n != null && n !== '' && Number.isFinite(Number(n))) members.set(roomId, Number(n));
+      }
+    }
     // flatten one /sync response into raw updates: every m.room.* timeline event of every joined room.
+    // `joinedMembers` is null when this homeserver never sent a summary for the room (unknown, not zero).
     function flatten(data) {
       const out = [];
+      harvestMembers(data);
       const rooms = (data && data.rooms && data.rooms.join) || {};
       for (const roomId of Object.keys(rooms)) {
         const events = (rooms[roomId] && rooms[roomId].timeline && rooms[roomId].timeline.events) || [];
-        for (const ev of events) out.push({ roomId: roomId, event: ev, selfId: selfId });
+        const joined = members.has(roomId) ? members.get(roomId) : null;
+        for (const ev of events) out.push({ roomId: roomId, event: ev, selfId: selfId, joinedMembers: joined });
       }
       return out;
     }
@@ -86,6 +100,7 @@
           const { res, data } = await call('GET', BASE + API + '/sync?timeout=0', null, a.signal);
           if (!res || !res.ok) throw syncError(res, data);
           since = String((data && data.next_batch) || '');
+          harvestMembers(data);   // the backlog is discarded, but the room summaries are the freshest we will get
           primed = true;
           return [];
         }
@@ -118,7 +133,7 @@
         }
       },
 
-      _internals: { get since() { return since; }, get selfId() { return selfId; } }
+      _internals: { get since() { return since; }, get selfId() { return selfId; }, get members() { return members; } }
     };
   }
 

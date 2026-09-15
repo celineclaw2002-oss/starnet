@@ -72,6 +72,7 @@ test/threads.e2e.test.js
 test/cron.session-transcript.e2e.test.js
 test/channels.telegram.e2e.test.js
 test/channels.telegram.connect-pairing.e2e.test.js
+test/channels.owner-pairing.e2e.test.js
 test/channels.telegram.multibot.e2e.test.js
 test/channels.telegram.botchain.e2e.test.js
 test/channels.telegram.buttons.e2e.test.js

@@ -123,7 +123,7 @@ async function run() {
     const got = [];
     const ad = makeChannelAdapter({
       transport: { getUpdates: async () => [], send: async () => ({ ok: true }) },
-      normalize: (r) => r, name: 'telegram', clock: { now: () => 1 },
+      normalize: (r) => r, name: 'telegram', clock: { now: () => 1 }, ownerUserId: 'u',
       onInbound: (im) => got.push(im)
     });
     ad._internals.dispatch({ offset: 1, message: { chatId: 1, chatType: 'dm', userId: 'u', text: 'hi', messageId: '1', replyTo: { text: 'earlier', userName: 'Ana' } } });

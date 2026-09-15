@@ -46,7 +46,7 @@ async function run() {
   {
     const inbox = [];
     const t = fakeTransport([[{ id: 10, chat: 'c1', type: 'dm', user: 'u1', uname: 'andro', text: 'hello', mid: '500' }]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', maxMessageLength: 4096,
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, maxMessageLength: 4096,
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 4 && !inbox.length; i++) await tick();
@@ -63,7 +63,7 @@ async function run() {
       { id: 2, chat: 'g_ok', type: 'group', user: 'u', text: 'yes', mid: '2' },      // group, allowed -> passes
       { id: 3, chat: 'dm1', type: 'dm', user: 'u', text: 'dm', mid: '3' }            // dm -> always passes
     ]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowedChats: ['g_ok'],
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, allowedChats: ['g_ok'],
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 5 && inbox.length < 2; i++) await tick();
@@ -71,7 +71,35 @@ async function run() {
     await a.disconnect();
   }
 
-  // ---- B2. owner-only DM admission: first DM claims owner; other users denied; preset owner skips claim ----
+  // ---- B1. NO trust-on-first-use: an unclaimed adapter with no enrollment hook admits NOBODY ----
+  {
+    const inbox = [], claims = [];
+    const t = fakeTransport([[
+      { id: 1, chat: 'dmA', type: 'dm', user: 'u1', text: 'first', mid: '1' },      // would have claimed ownership before
+      { id: 2, chat: 'dmA', type: 'dm', user: 'u1', text: 'again', mid: '2' }
+    ]]);
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+      onInbound: m => inbox.push(m), onOwnerClaim: u => claims.push(u), clock: CLOCK, sleep: () => Promise.resolve() });
+    await a.connect();
+    for (let i = 0; i < 6; i++) await tick();
+    A.eq(inbox, [], 'default: the first DM does NOT claim the bot — nothing reaches onInbound');
+    A.eq(claims, [], 'no owner claim fires without an enrollment hook');
+    A.eq(a._internals.owner, '', 'the adapter stays unclaimed');
+    A.eq(t.sends, [], 'and the stranger gets no reply (silent drop)');
+    await a.disconnect();
+    // the host wiring never opts into the legacy first-DM claim; every platform forwards the /pair hook instead
+    const fs = require('fs'), path = require('path');
+    const idx = fs.readFileSync(path.join(__dirname, '..', 'sidecar', 'index.js'), 'utf8');
+    A.ok(!/allowTrustOnFirstUse/.test(idx), 'sidecar/index.js never sets allowTrustOnFirstUse');
+    A.ok((idx.match(/ownerAdmission: \(message\) => channelOwnerAdmission\(/g) || []).length >= 4, 'telegram (station + agent bots), discord and the generic channels all wire the /pair admission hook');
+    for (const mod of ['discord', 'slack', 'matrix', 'signal', 'telegram']) {
+      const src = fs.readFileSync(path.join(__dirname, '..', 'sidecar', 'channels', mod + '.js'), 'utf8');
+      A.ok(/ownerAdmission: o\.ownerAdmission/.test(src), mod + '.js forwards ownerAdmission to the generic adapter');
+    }
+  }
+
+  // ---- B2. owner-only DM admission (LEGACY first-DM claim, explicit test-only opt-in): first DM claims owner;
+  //      other users denied; preset owner skips claim ----
   {
     const inbox = [], claims = [];
     const t = fakeTransport([[
@@ -79,7 +107,7 @@ async function run() {
       { id: 2, chat: 'dmB', type: 'dm', user: 'u2', text: 'intruder', mid: '2' },   // different user -> dropped
       { id: 3, chat: 'dmA', type: 'dm', user: 'u1', text: 'again', mid: '3' }        // owner -> admitted
     ]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => inbox.push(m), onOwnerClaim: u => claims.push(u), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 6 && inbox.length < 2; i++) await tick();
@@ -122,7 +150,7 @@ async function run() {
       { id: 2, chat: 'dmA', type: 'dm', user: 'owner', text: '/pair ABCDE-FGHIJ', mid: '2' },
       { id: 3, chat: 'dmA', type: 'dm', user: 'owner', text: 'run this', mid: '3' }
     ]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => inbox.push(m), onOwnerClaim: u => claims.push(u),
       ownerAdmission: (m, uid) => (uid === 'owner' && m.text === '/pair ABCDE-FGHIJ')
         ? { allow: true, consume: true, reply: 'Owner paired.' } : false,
@@ -208,7 +236,7 @@ async function run() {
     const t = fakeTransport([
       [{ id: 400, chat: 'c', type: 'dm', user: 'u', text: 'sent while it was down', mid: '1' }]
     ]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', dropPendingOnConnect: true,
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, dropPendingOnConnect: true,
       onInbound: () => {}, clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 8; i++) await tick();
@@ -223,7 +251,7 @@ async function run() {
       [{ id: 401, chat: 'c', type: 'dm', user: 'u', text: 'live one', mid: '2' }],
       [{ id: 402, chat: 'c', type: 'dm', user: 'u', text: 'live two', mid: '3' }]
     ]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', dropPendingOnConnect: true,
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, dropPendingOnConnect: true,
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 12 && inbox.length < 2; i++) await tick();
@@ -243,7 +271,7 @@ async function run() {
       [{ id: 501, chat: 'c', type: 'dm', user: 'u', text: 'owner here', mid: '2' }],
       []
     ]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', dropPendingOnConnect: true,
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, dropPendingOnConnect: true,
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 10 && !inbox.length; i++) await tick();
@@ -275,7 +303,7 @@ async function run() {
       [{ id: 10, chat: 'c', type: 'dm', user: 'u', text: 'a', mid: '1' }],
       [{ id: 11, chat: 'c', type: 'dm', user: 'u', text: 'b', mid: '2' }]
     ]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 6 && inbox.length < 2; i++) await tick();
@@ -292,7 +320,7 @@ async function run() {
     const update = [{ id: 20, chat: 'c', type: 'dm', user: 'u', text: 'must survive', mid: '20' }];
     const t = fakeTransport([update, update]);   // Telegram redelivers because the first offset was not advanced
     let claims = 0;
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => { claims++; if (claims === 1) throw new Error('disk unavailable'); inbox.push(m); },
       clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
@@ -309,7 +337,7 @@ async function run() {
       { ok: false, retryable: true }, { ok: true, messageId: 'ok2' },   // resend succeeds
       { ok: false, retryable: false }                                    // hard fail: no resend
     ]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: () => {}, clock: CLOCK, sleep: () => Promise.resolve() });
     const r1 = await a.send('c', 'hi');
     A.eq(t.sends.length, 1, 'ok send -> one transport call');
@@ -326,7 +354,7 @@ async function run() {
   {
     const waits = [];
     const t = fakeTransport([[]], [{ ok: false, retryable: true, retryAfter: 3 }, { ok: true, messageId: 'ok' }]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: () => {}, clock: CLOCK, sleep: (ms) => { waits.push(ms); return Promise.resolve(); } });
     const r = await a.send('c', 'flooded');
     A.eq(t.sends.length, 2, 'resend fired (after the wait)');
@@ -338,7 +366,7 @@ async function run() {
   {
     const delivery = [];
     const t = fakeTransport([[]], [{ ok: false, retryable: true, error: 'temporary' }, { ok: false, retryable: false, error: 'blocked' }]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', onInbound: () => {}, clock: CLOCK,
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, onInbound: () => {}, clock: CLOCK,
       sleep: () => Promise.resolve(), onDelivery: d => delivery.push(d) });
     await a.send('chat-1', 'reply');
     A.eq(delivery.length, 1, 'one aggregate delivery outcome after bounded retry');
@@ -351,7 +379,7 @@ async function run() {
   {
     const inbox = [];
     const t = fakeTransport([[{ id: 1, chat: 'c', type: 'dm', user: 'u', text: 'x', mid: '1' }]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 4 && !inbox.length; i++) await tick();
@@ -366,7 +394,7 @@ async function run() {
   {
     const inbox = [];
     const t = fakeTransport([[{ id: 7, chat: 'c', type: 'dm', user: 'u' /* no text -> sticker/photo */ }]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => inbox.push(m), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     await tick(); await tick();
@@ -430,7 +458,7 @@ async function run() {
       send() { return Promise.resolve({ ok: true }); }
     };
     const inbox = [];
-    const a = makeChannelAdapter({ transport, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: m => inbox.push(m), onStatus: s => statuses.push(s), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 8 && !inbox.length; i++) await tick();
@@ -455,7 +483,7 @@ async function run() {
       },
       send() { return Promise.resolve({ ok: true }); }
     };
-    const a = makeChannelAdapter({ transport, normalize, name: 'telegram', onInbound: () => {},
+    const a = makeChannelAdapter({ transport, normalize, name: 'telegram', allowTrustOnFirstUse: true, onInbound: () => {},
       onStatus: s => statuses.push(s), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 10 && !statuses.some(s => s.state === 'up'); i++) await tick();
@@ -469,7 +497,7 @@ async function run() {
     const fatal = Object.assign(new Error('401 unauthorized'), { fatal: true });
     const statuses = [];
     const transport = { getUpdates() { return Promise.reject(fatal); }, send() { return Promise.resolve({ ok: true }); } };
-    const a = makeChannelAdapter({ transport, normalize, name: 'telegram',
+    const a = makeChannelAdapter({ transport, normalize, name: 'telegram', allowTrustOnFirstUse: true,
       onInbound: () => {}, onStatus: s => statuses.push(s), clock: CLOCK, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 4 && !statuses.length; i++) await tick();
@@ -498,7 +526,7 @@ async function run() {
       send() { return Promise.resolve({ ok: true }); }
     };
     const inbox = [];
-    const a = makeChannelAdapter({ transport, normalize, name: 'telegram', conflictRetryMs: 12345,
+    const a = makeChannelAdapter({ transport, normalize, name: 'telegram', allowTrustOnFirstUse: true, conflictRetryMs: 12345,
       onInbound: m => inbox.push(m), onStatus: s => statuses.push(s), clock: CLOCK,
       sleep: (ms) => { if (ms === 12345) conflictSleeps++; return Promise.resolve(); } });
     await a.connect();
@@ -514,7 +542,7 @@ async function run() {
   {
     A.eq([...normalizeAllowed(['a', 1, 'a'])].sort(), ['1', 'a'], 'normalizeAllowed stringifies + dedupes');
     const t = fakeTransport([[]]);
-    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', maxMessageLength: 4096,
+    const a = makeChannelAdapter({ transport: t, normalize, name: 'telegram', allowTrustOnFirstUse: true, maxMessageLength: 4096,
       onInbound: () => {}, clock: CLOCK, sleep: () => Promise.resolve() });
     A.eq(a.name, 'telegram', 'name exposed');
     A.eq(a.MAX_MESSAGE_LENGTH, 4096, 'MAX_MESSAGE_LENGTH exposed');

@@ -86,15 +86,18 @@
     const sleep = typeof o.sleep === 'function' ? o.sleep : (ms => new Promise(r => setTimeout(r, ms)));
     const dropPending = o.dropPendingOnConnect === true;   // generic default OFF; the Telegram layer turns it on
 
-    // owner-only admission for DMs (trust-on-first-use): the FIRST direct message claims ownership; every later
-    // DM from a DIFFERENT user is dropped BEFORE onInbound — i.e. before any model key is spent or memory is read.
-    // A preset ownerUserId (restored from saved config) skips the claim. Empty string == unclaimed. Group access
-    // stays governed by allowedChats, independently.
+    // owner-only admission for DMs: every DM from a user other than the owner is dropped BEFORE onInbound — i.e.
+    // before any model key is spent or memory is read. A preset ownerUserId (restored from saved config) is the
+    // owner; empty string == unclaimed. An UNCLAIMED adapter admits nobody: ownership is only ever claimed through
+    // the explicit `ownerAdmission` enrollment hook (the host's /pair <code> exchange). There is deliberately NO
+    // trust-on-first-use — a bot token is discoverable, so "the first DM owns the bot" is not an identity check.
+    // `allowTrustOnFirstUse: true` is an explicit, test/dev-only opt-in that restores the old first-DM claim; the
+    // host never sets it (channels.adapter.test pins that). Group access stays governed by allowedChats.
     let owner = o.ownerUserId ? String(o.ownerUserId) : '';
     const onOwnerClaim = typeof o.onOwnerClaim === 'function' ? o.onOwnerClaim : null;
-    // Optional explicit-enrollment hook. Absent it, existing adapters retain TOFU behavior.
-    // It receives (message, userId) and returns true or { allow, consume, reply }.
+    // The explicit-enrollment hook. It receives (message, userId) and returns true or { allow, consume, reply }.
     const ownerAdmission = typeof o.ownerAdmission === 'function' ? o.ownerAdmission : null;
+    const allowTrustOnFirstUse = o.allowTrustOnFirstUse === true;
     // Chats whose offline backlog we discarded while the owner was still UNCLAIMED (a fresh install, or any
     // first contact). We cannot apologise at connect: claiming ownership from stale backlog is exactly the
     // anti-stale-directive behaviour we preserve, and answering a chat we have NOT yet proven is the owner
@@ -112,7 +115,7 @@
       const uid = String(userId == null ? '' : userId);
       if (owner) return { ok: uid === owner, claimed: false, consume: false, reply: '' };
       if (!uid) return { ok: false, claimed: false, consume: false, reply: '' };
-      let decision = true; // preserve trust-on-first-use for adapter callers that have not opted in
+      let decision = allowTrustOnFirstUse; // default DENY: an unclaimed bot stays silent until enrolled
       if (ownerAdmission) {
         try { decision = ownerAdmission(message || {}, uid); } catch (_) { decision = false; }
       }

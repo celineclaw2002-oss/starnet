@@ -100,6 +100,32 @@ A.ok(taint.allowedWhenTainted(null), 'an unknown tool falls through to the ordin
 // an MCP tool with no explicit scope must fail SAFE toward read (translate.js defaults readOnly -> 'read')
 A.ok(!taint.allowedWhenTainted({ name: 'x', capability: 'mcp:z' }), 'a scope-less connector is still blocked');
 
+// ---- 4a. browser VERBS: after untrusted content the run may keep LOOKING but may no longer ACT on a page ----
+{
+  const browserTool = (name, scope) => ({ name, capability: 'web', impact: 'synthetic-browser', scope, requiresConsent: false });
+  for (const verb of ['click', 'type', 'press', 'eval', 'upload', 'drag', 'login', 'select', 'hover', 'dialog', 'intercept', 'tab_close'])
+    A.ok(!taint.allowedWhenTainted(browserTool('browser.' + verb, 'execute')), 'a tainted run loses browser.' + verb);
+  for (const read of ['navigate', 'snapshot', 'get_text', 'screenshot', 'find', 'console', 'network', 'tabs', 'wait', 'vision', 'pdf', 'inspect'])
+    A.ok(taint.allowedWhenTainted(browserTool('browser.' + read, 'read')), 'browser.' + read + ' (a read / navigation) survives');
+  A.ok(!taint.allowedWhenTainted({ name: 'browser.click', capability: 'web' }), 'a browser tool with NO scope fails closed (impact is inferred from the name)');
+  A.ok(!taint.allowedWhenTainted({ name: 'browser.test_input', capability: 'workbench', impact: 'synthetic-browser', scope: 'execute' }), 'the workbench test-input verb is a mutation too');
+  A.ok(taint.allowedWhenTainted({ name: 'browser.test_snapshot', capability: 'workbench', impact: 'synthetic-browser', scope: 'read' }), 'the workbench test reads survive');
+  // the scopes the law keys on are the ones browser.js actually stamps: navigate + every page read use the `read`
+  // helper (scope 'read'); every verb that acts on the page uses `exec` (scope 'execute'); login is 'execute'.
+  const browserSrc = fs.readFileSync(path.join(root, 'sidecar', 'tools', 'builtin', 'browser.js'), 'utf8');
+  A.ok(/const read = \(name, description, schema, run\) => \(\{ name, capability: 'web', impact: 'synthetic-browser', scope: 'read'/.test(browserSrc), 'browser.js read helper stamps scope read');
+  A.ok(/const exec = \(name, description, schema, run, consent\) => \(\{ name, capability: 'web', impact: 'synthetic-browser', scope: 'execute'/.test(browserSrc), 'browser.js exec helper stamps scope execute');
+  A.ok(/read\('browser\.navigate'/.test(browserSrc), 'browser.navigate is defined as a read (survives taint)');
+  for (const verb of ['click', 'type', 'press', 'eval', 'upload', 'drag'])
+    A.ok(new RegExp("exec\\('browser\\." + verb + "'").test(browserSrc), 'browser.' + verb + ' is defined as an exec (revoked by taint)');
+  A.ok(/name: 'browser\.login', capability: 'web', impact: 'synthetic-browser', scope: 'execute'/.test(browserSrc), 'browser.login is scope execute (revoked by taint)');
+  // and the temporal boundary applies to them exactly like the shell: unattended = gone; watched = fresh one-call ask
+  A.eq(taint.postTaintBoundary(browserTool('browser.click', 'execute'), { taintedBy: 'browser.get_text', surface: 'autonomous', hasPrompt: false }),
+    { allow: false, needsConfirmation: false, oneShot: false }, 'an unattended tainted run cannot click');
+  A.eq(taint.postTaintBoundary(browserTool('browser.click', 'execute'), { taintedBy: 'browser.get_text', surface: 'interactive', hasPrompt: true }),
+    { allow: false, needsConfirmation: true, oneShot: false }, 'a watched tainted run must confirm the exact click');
+}
+
 // ---- 4b. confirmation is temporal and one-call, never inferred from a standing grant ----
 A.eq(taint.postTaintBoundary(SHELL, { taintedBy: 'web_fetch', surface: 'autonomous', hasPrompt: true, decision: 'always' }),
   { allow: false, needsConfirmation: false, oneShot: false }, 'an unattended run cannot recover even from an injected/cached affirmative');

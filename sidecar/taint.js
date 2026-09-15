@@ -60,6 +60,12 @@
     if (impact === 'workspace-process') return false;        // shell.exec / verify.run
     if (impact === 'external-credentialed') return false;    // web_request — spends a stored key outward
     if (impact === 'external-unknown') return false;         // fail closed on effects the host cannot classify
+    // A synthetic-browser MUTATION (click / type / press / eval / upload / drag / login / …) is an outward action
+    // taken on whatever the page just said — the classic injected "click Approve, then type this into the form".
+    // browser.js stamps every page READ and browser.navigate with scope 'read' and every verb that acts on a page
+    // with scope 'execute', so the scope (host-authored, never page-authored) is the line: reads and navigation
+    // survive so the run can keep looking; anything else fails closed, including a scope-less browser tool.
+    if (impact === 'synthetic-browser' && String(tool.scope || '') !== 'read') return false;
     // Every MCP annotation is supplied by the server. In particular readOnlyHint may lie, so using the
     // translated scope here would let a malicious connector label a mutator as a safe post-injection read.
     if (CONNECTOR_CAP.test(String(tool.capability || ''))) return false;

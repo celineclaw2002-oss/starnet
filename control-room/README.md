@@ -90,3 +90,20 @@ The token is stored in the connector secret store under the data root and sent a
 on every MCP request; it is never echoed back by `GET /api/connectors`. Tool results from the runtime are
 untrusted content like any other: a run that reads them is tainted, which revokes mutating browser verbs and
 memory writes for the rest of that run.
+
+## Test status of the `control-room/hardening` branch
+
+`npm run test:fast` (774 steps) was run on this branch on 2026-09-16 on a Mac mini with Node 24. Every
+step passes except the following, none of which is a defect introduced here:
+
+| Test | Why it fails here |
+| --- | --- |
+| `crt-context-loss.e2e`, `world-sharpen`, `worldlight-receiver`, `stationbake.connections` | need a Chrome binary (`SKYNET_CHROME`); visual tests, also skipped/failed on trunk in this environment |
+| `value-loop-replay` | macOS `/tmp` is a symlink; the test refuses linked replay folders; same on trunk |
+| `ledger-reconcile`, `pathtrust`, `project-discovery`, `discovery-documents` | fail identically on the upstream base commit (6e076c5) in this clone; environment, not this branch |
+| `qa-product-perfect-claims` | upstream's release-governance audit: the advertised-claims ledger (`qa/product-perfect/claims.json`) must be re-audited whenever a "release surface" file changes, and the `/pair` enrollment UI changed `frontend/app/windows/messaging.js`. The fork ships no release, so the ledger is left untouched rather than re-stamped. |
+
+Everything the hardening commits touch (channels, taint, memory, Host pin, agent ids, base URLs, sharp,
+settings locks) is covered by the suites that pass: `channels.adapter`, `channels.telegram`,
+`channels.commands`, `untrusted-taint`, `settings-p1-backend`, `agentid`, `boot-security`, and the rest
+of the fast list.

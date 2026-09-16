@@ -17536,7 +17536,7 @@ async function runOnce(o) {
   // `!execution.taintedBy()`: a run that read outside content never reflects — its dialogue may carry an
   // injection's "facts", and reflection would auto-save them as beliefs (see runReflection). Nothing fires and
   // no cooldown arms, so the agent's next clean run reflects as usual.
-  const _gateReflect = !!(o.reflect && !execution.taintedBy() && memoryConfig.reflectEnabled && isTask && _auxDone && reflectSalient(result.messages, o.recurring)
+  const _gateReflect = !!(o.reflect && memoryConfig.reflectEnabled && isTask && !execution.taintedBy() && _auxDone && reflectSalient(result.messages, o.recurring)
       && !reflectingNow.has(agentId) && (Date.now() - (lastReflectAt.get(agentId) || 0) >= memoryConfig.reflectCooldownMs));
   // failure-review: reflection's exact gate shape on the FAILURE side — o.reflect (real-work hosts only; delegated
   // workers stay off), the live config master-switch, the personalization PAUSE (checked here so a paused station

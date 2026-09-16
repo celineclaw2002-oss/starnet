@@ -288,7 +288,7 @@ async function run() {
       return resp(200, { ok: true, result: { message_id: 1 } });   // deleteWebhook / sendMessage
     });
     // drop-pending OFF here so the first poll IS the delivery (this case tests basic end-to-end, not backlog).
-    const a = makeTelegramAdapter({ fetch: f, token: 'TKN', dropPendingOnConnect: false, onInbound: m => inbox.push(m), clock: { now: () => 1234 }, sleep: () => Promise.resolve() });
+    const a = makeTelegramAdapter({ allowTrustOnFirstUse: true, fetch: f, token: 'TKN', allowTrustOnFirstUse: true, dropPendingOnConnect: false, onInbound: m => inbox.push(m), clock: { now: () => 1234 }, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 8 && !inbox.length; i++) await tick();
     A.eq(inbox.length, 1, 'end-to-end: one inbound delivered');
@@ -311,7 +311,7 @@ async function run() {
       }
       return resp(200, { ok: true, result: { message_id: 1 } });
     });
-    const a = makeTelegramAdapter({ fetch: f, token: 'TKN', dropPendingOnConnect: false, onInbound: m => inbox.push(m), clock: { now: () => 7 }, sleep: () => Promise.resolve() });
+    const a = makeTelegramAdapter({ allowTrustOnFirstUse: true, fetch: f, token: 'TKN', allowTrustOnFirstUse: true, dropPendingOnConnect: false, onInbound: m => inbox.push(m), clock: { now: () => 7 }, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 8 && !inbox.length; i++) await tick();
     A.eq(inbox.length, 1, 'media message delivered inbound (no longer dropped)');
@@ -334,7 +334,7 @@ async function run() {
       }
       return resp(200, { ok: true, result: { message_id: 1 } });
     });
-    const a = makeTelegramAdapter({ fetch: f, token: 'TKN', onInbound: m => inbox.push(m), clock: { now: () => 1 }, sleep: () => Promise.resolve() });
+    const a = makeTelegramAdapter({ allowTrustOnFirstUse: true, fetch: f, token: 'TKN', onInbound: m => inbox.push(m), clock: { now: () => 1 }, sleep: () => Promise.resolve() });
     await a.connect();
     for (let i = 0; i < 8 && !inbox.length; i++) await tick();
     A.eq(inbox.map(m => m.text), ['fresh'], 'Telegram default discards the offline backlog, delivers only fresh');

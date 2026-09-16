@@ -36,15 +36,11 @@
         clear: (b) => { b.querySelector('#tg-token').value = ''; },
         emptyMsg: 'paste your @BotFather token first',
         okMsg: '✓ connected — Telegram is accepting owner DMs',
+        pairNote: 'Pairing tells your bot which Telegram account is yours. Send the /pair message to your new bot, not to BotFather. The pairing code expires after 10 minutes.',
         // multi-bot: each additional bot is a SEPARATE Telegram contact hard-bound to one agent. The list paints
         // exclusively from the status payload's bots[] (truthful per-instance transport state); the add flow is
         // token + agent — the sidecar validates the token with getMe before anything persists.
         extraHtml:
-          '<div class="ch-bots" id="tg-owner">' +
-            '<div class="ch-bots-head">Pair your Telegram account <span class="dim" id="tg-owner-state">not paired</span></div>' +
-            '<p class="ch-note">Pairing tells your bot which Telegram account is yours. Send the /pair message to your new bot, not to BotFather. The pairing code expires after 10 minutes.</p>' +
-            '<div class="set-save"><button class="bb xs" id="tg-owner-pair">PAIR OWNER</button> <button class="bb xs danger" id="tg-owner-revoke" style="display:none">REVOKE OWNER</button></div>' +
-          '</div>' +
           '<div class="ch-bots" id="tg-bots">' +
             '<div class="ch-bots-head">Agent bots <span class="dim">A separate Telegram contact per agent</span></div>' +
             '<div id="tg-bots-list"></div>' +
@@ -185,6 +181,15 @@
         '<span class="ch-optin-d dim">When autonomous work produces a result, notify me on every connected channel.</span></span>' +
         '<input type="checkbox" id="ch-notify"></label><div id="ch-notify-msg" class="msg"></div></div>' +
       '<p class="ch-headless"><b>Keep StarNet running.</b> You can close this window. Messages sent while the station app is fully off are not processed; you receive an "I was offline" note instead.</p>';
+    // OWNER ENROLLMENT block, one per platform: no channel runs a DM until the locally issued /pair code is
+    // redeemed (there is no first-DM-owns-the-bot anywhere), so every card carries the same PAIR/REVOKE controls.
+    function ownerHtml(c) {
+      return '<div class="ch-bots" id="' + c.pre + '-owner">' +
+          '<div class="ch-bots-head">Pair your ' + c.title + ' account <span class="dim" id="' + c.pre + '-owner-state">not paired</span></div>' +
+          '<p class="ch-note">' + (c.pairNote || 'Pairing tells the agent which account is yours: send the /pair message StarNet shows you as a direct message to the bot. Until an owner is paired, every message is ignored. The pairing code expires after 10 minutes.') + '</p>' +
+          '<div class="set-save"><button class="bb xs" id="' + c.pre + '-owner-pair">PAIR OWNER</button> <button class="bb xs danger" id="' + c.pre + '-owner-revoke" style="display:none">REVOKE OWNER</button></div>' +
+        '</div>';
+    }
     function cardHtml(c) {
       return '<div class="ch-card" id="ch-card-' + c.id + '" style="--accent:' + c.accent + '">' +
           '<div class="ch-head">' +
@@ -209,7 +214,7 @@
             '<button class="bb xs danger" id="' + c.pre + '-forget" style="display:none" title="' + (c.id === 'signal' ? 'removes the saved bridge URL and registered number from this machine' : 'permanently deletes the saved token from this machine (record + OS keychain) — you’d have to set it up again') + '">' + (c.id === 'signal' ? '✕ REMOVE CONFIGURATION' : '⌫ FORGET') + '</button>' +
           '</div>' +
           '<div id="' + c.pre + '-msg" class="msg"></div>' +
-          '</section>' + (c.extraHtml || '') +
+          '</section>' + ownerHtml(c) + (c.extraHtml || '') +
         '</div>';
     }
     // Real platform marks share the station theme and stay decorative beside the text labels.
@@ -308,9 +313,9 @@
       const state = st && st.state;
       const inFlight = !conn && (state === 'connecting' || state === 'reconnecting');
       const configured = !!(st && st.configured);
-      // Telegram has two separate truths: Bot API polling and admitted owner DMs. Polling without a paired owner
-      // is real transport health, but it is not an operational channel; ordinary messages are refused by design.
-      const pairingBlocked = c.id === 'telegram' && conn && !(st && st.acceptingDms === true);
+      // Every platform has two separate truths: transport health and admitted owner DMs. Polling without a paired
+      // owner is real transport health, but it is not an operational channel; ordinary messages are refused by design.
+      const pairingBlocked = conn && !(st && st.acceptingDms === true);
       configuredById[c.id] = configured;
       el.className = 'ch-state ' + (pairingBlocked ? 'st-wait' : stateClass(conn, inFlight, state, configured));
       el.textContent = pairingBlocked ? '◐ POLLING — DMs BLOCKED: PAIR OWNER'
@@ -377,23 +382,24 @@
         inp.placeholder = (configured && !inp.value) ? '•••• saved — paste to replace' : savedPlaceholder[inp.id];
       });
 
-      if (c.id === 'telegram') {
-        try { paintTelegramBots(st && st.bots); } catch (_) {}
-        const ownerState = body.querySelector('#tg-owner-state');
-        const pairBtn = body.querySelector('#tg-owner-pair');
-        const revokeBtn = body.querySelector('#tg-owner-revoke');
+      if (c.id === 'telegram') { try { paintTelegramBots(st && st.bots); } catch (_) {} }
+      // owner enrollment truth for EVERY platform (ownerHtml): paired / code active / not paired, + the buttons.
+      {
+        const ownerState = body.querySelector('#' + c.pre + '-owner-state');
+        const pairBtn = body.querySelector('#' + c.pre + '-owner-pair');
+        const revokeBtn = body.querySelector('#' + c.pre + '-owner-revoke');
         const ownerLocked = !!(st && st.ownerLocked);
         const pairingActive = !!(st && st.ownerPairingActive);
         if (ownerState) ownerState.textContent = ownerLocked ? 'owner paired'
           : pairingActive ? 'pairing code active - awaiting /pair' : 'not paired';
         if (pairBtn) { pairBtn.style.display = configured && !ownerLocked ? '' : 'none'; pairBtn.disabled = !configured; }
-        if (revokeBtn) { revokeBtn.style.display = ownerLocked ? '' : 'none'; if (!ownerLocked) disarm('tg-owner-revoke', revokeBtn, 'REVOKE OWNER'); }
-        const msgEl = body.querySelector('#tg-msg');
-        if (ownerLocked && pairingInstruction.telegram) {
-          delete pairingInstruction.telegram;
-          setMsg(msgEl, '✓ owner paired — Telegram is connected and accepting DMs', 'ok');
-        } else if (!ownerLocked && !pairingActive && pairingInstruction.telegram) {
-          delete pairingInstruction.telegram;
+        if (revokeBtn) { revokeBtn.style.display = ownerLocked ? '' : 'none'; if (!ownerLocked) disarm(c.pre + '-owner-revoke', revokeBtn, 'REVOKE OWNER'); }
+        const msgEl = body.querySelector('#' + c.pre + '-msg');
+        if (ownerLocked && pairingInstruction[c.id]) {
+          delete pairingInstruction[c.id];
+          setMsg(msgEl, '✓ owner paired — ' + c.title + ' is connected and accepting DMs', 'ok');
+        } else if (!ownerLocked && !pairingActive && pairingInstruction[c.id]) {
+          delete pairingInstruction[c.id];
           setMsg(msgEl, 'pairing code expired — click PAIR OWNER for a fresh one', 'info');
         }
       }
@@ -402,8 +408,8 @@
       if (pendingConnect[c.id]) {
         const msgEl = body.querySelector('#' + c.pre + '-msg');
         if (conn) {
-          if (c.id === 'telegram' && !(st && st.acceptingDms === true)) {
-            setMsg(msgEl, pairingInstruction.telegram || 'Telegram is polling, but DMs stay blocked until you click PAIR OWNER and send the /pair command.', 'info');
+          if (!(st && st.acceptingDms === true)) {
+            setMsg(msgEl, pairingInstruction[c.id] || (c.title + ' is connected, but DMs stay blocked until you click PAIR OWNER and send the /pair command.'), 'info');
           } else setMsg(msgEl, c.okMsg, 'ok');
           delete pendingConnect[c.id];
           // first-steps: only ticked on the PROVEN round-trip (this branch), never on the optimistic POST.
@@ -538,11 +544,12 @@
           else {
             // DERIVE the outcome line from the status refresh (paintCard finalizes pendingConnect), NOT from this
             // POST — the sidecar only reports 'connecting' until the transport actually proves the round-trip.
-            if (c.id === 'telegram' && j.pairingCode) {
-              pairingInstruction.telegram = 'Telegram poller starting. To activate DMs, send this exact message to your bot: /pair ' + j.pairingCode + ' (expires in 10 minutes).';
-              setMsg(msgEl, pairingInstruction.telegram, 'info');
-            } else if (c.id === 'telegram' && j.pairingRequired) {
-              setMsg(msgEl, 'Telegram poller starting, but DMs are blocked: ' + (j.pairingError || 'click PAIR OWNER to issue a pairing command.'), 'info');
+            // every platform returns a one-time /pair code while it has no paired owner (ownerPairingOnConnect)
+            if (j.pairingCode) {
+              pairingInstruction[c.id] = c.title + ' is starting. To activate DMs, send this exact message to your bot as a direct message: /pair ' + j.pairingCode + ' (expires in 10 minutes).';
+              setMsg(msgEl, pairingInstruction[c.id], 'info');
+            } else if (j.pairingRequired) {
+              setMsg(msgEl, c.title + ' is starting, but DMs are blocked: ' + (j.pairingError || 'click PAIR OWNER to issue a pairing command.'), 'info');
             } else if (localFallback) setMsg(msgEl, 'connecting… (token saved locally, not the OS keychain)', 'info');
             sfx('click');
             try { c.clear(body); } catch (_) {}
@@ -616,32 +623,34 @@
       });
     }
 
-    // ---- Telegram owner enrollment: code comes from the local authenticated sidecar and is never polled back. ----
-    (function wireTelegramOwner() {
-      const msgEl = body.querySelector('#tg-msg');
-      const pairBtn = body.querySelector('#tg-owner-pair');
-      const revokeBtn = body.querySelector('#tg-owner-revoke');
+    // ---- owner enrollment, EVERY platform: the code comes from the local authenticated sidecar and is never
+    // polled back. One route family (/api/channels/<id>/owner/pair|revoke) behind one wiring. ----
+    function wireChannelOwner(c) {
+      const msgEl = body.querySelector('#' + c.pre + '-msg');
+      const pairBtn = body.querySelector('#' + c.pre + '-owner-pair');
+      const revokeBtn = body.querySelector('#' + c.pre + '-owner-revoke');
       if (!pairBtn || !revokeBtn) return;
       pairBtn.addEventListener('click', async () => {
         try {
-          const r = await Harness.api.post('/api/channels/telegram/owner/pair', {});
+          const r = await Harness.api.post('/api/channels/' + c.id + '/owner/pair', {});
           const j = r.j || {};
           if (!r.ok || j.error || !j.code) { setMsg(msgEl, 'could not issue a pairing code: ' + (j.error || ('HTTP ' + r.status)), ''); sfx('bad'); return; }
-          pairingInstruction.telegram = 'In Telegram, DM this bot: /pair ' + j.code + ' (code expires in 10 minutes).';
-          setMsg(msgEl, pairingInstruction.telegram, 'info');
+          pairingInstruction[c.id] = 'In ' + c.title + ', DM this bot: /pair ' + j.code + ' (code expires in 10 minutes).';
+          setMsg(msgEl, pairingInstruction[c.id], 'info');
           sfx('click'); refreshAll();
         } catch (_) { setMsg(msgEl, 'could not reach the sidecar', ''); sfx('bad'); }
       });
-      revokeBtn.addEventListener('click', () => armed('tg-owner-revoke', revokeBtn, 'REVOKE OWNER', 'CONFIRM REVOKE', async () => {
+      revokeBtn.addEventListener('click', () => armed(c.pre + '-owner-revoke', revokeBtn, 'REVOKE OWNER', 'CONFIRM REVOKE', async () => {
         try {
-          const r = await Harness.api.post('/api/channels/telegram/owner/revoke', {});
+          const r = await Harness.api.post('/api/channels/' + c.id + '/owner/revoke', {});
           const j = r.j || {};
           if (!r.ok || j.error) { setMsg(msgEl, 'could not revoke owner: ' + (j.error || ('HTTP ' + r.status)), ''); sfx('bad'); }
-          else { setMsg(msgEl, 'owner revoked locally - issue a new pairing code before Telegram can run the agent again', 'info'); sfx('click'); }
+          else { setMsg(msgEl, 'owner revoked locally - issue a new pairing code before ' + c.title + ' can run the agent again', 'info'); sfx('click'); }
         } catch (_) { setMsg(msgEl, 'could not reach the sidecar', ''); sfx('bad'); }
         refreshAll();
       }));
-    })();
+    }
+    for (const c of CHANNEL_CATALOG) wireChannelOwner(c);
 
     // ---- multi-bot telegram wiring: add / resume / disconnect / forget --------------------------------------
     (function wireTelegramBots() {

@@ -337,7 +337,7 @@ const DESKTOP_SHELL = /^(1|true|yes|on)$/i.test(String(ENV('DESKTOP_SHELL') || '
 // the per-launch token (GET data routes included) except a small header-less set. Native media/file loads
 // can pass the same token as ?token= on /api/file only; all other fetch-driven calls use the custom header.
 const apiauth = require('./apiauth.js');
-const { isReservedAgentId } = require('./agentid.js');   // respond.isAgentId already applies the reserved-name law; this names the reason
+const { isAgentId, isReservedAgentId } = require('./agentid.js');   // respond.isAgentId already applies the reserved-name law; this names the reason
 const { baseUrlProblem } = require('./baseurl.js');   // ONE base-URL law: https, or http only to 127.0.0.1/localhost/[::1], never user:pass@
 const { isAllowedApiOrigin, isAllowedHost, requiresApiToken, TAURI_ORIGINS } = apiauth;
 function applyApiCors(req, res) {
@@ -1605,7 +1605,6 @@ initWorkspaceSchemaStamp();
 // sees it. Returns { ok, agentId, model, name, error } — truthful: ok:false when there is nothing to write to.
 function setAgentModelFromChannel(agentId, model) {
   const id = String(agentId || '');
-  if (!isAgentId(id)) return { ok: false, agentId: id, error: 'bad agentId' };
   const m = String(model == null ? '' : model).trim();
   if (!m) return { ok: false, agentId: id, error: 'empty model' };
   const cur = agentRoster.get(id);

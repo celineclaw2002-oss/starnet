@@ -289,6 +289,7 @@
       name: 'telegram',
       maxMessageLength: MAX_MESSAGE_LENGTH,
       allowedChats: o.allowedChats,
+      allowTrustOnFirstUse: o.allowTrustOnFirstUse,   // explicit test/dev-only opt-in; production hosts never set it
       onInbound: o.onInbound,
       onCallback: o.onCallback,
       onStatus: o.onStatus,

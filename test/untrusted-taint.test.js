@@ -204,7 +204,7 @@ A.eq(taint.postTaintBoundary(FS_WRITE, { taintedBy: 'web_fetch', surface: 'auton
   // REFLECTION auto-saves ordinary beliefs with no confirmation (cron, night shift and channel runs all pass
   // reflect:true). A tainted run must never reach that save: the aux gate withholds the pass AND runReflection
   // refuses a tainted envelope, so neither path can launder injected "facts" into memory.
-  A.ok(/const _gateReflect = !!\(o\.reflect && !execution\.taintedBy\(\) &&/.test(src), 'the reflection gate is closed on a tainted run (no pass fires, no cooldown arms)');
+  A.ok(/const _gateReflect = !!\(o\.reflect && memoryConfig\.reflectEnabled && isTask && !execution\.taintedBy\(\) &&/.test(src), 'the reflection gate is closed on a tainted run (no pass fires, no cooldown arms)');
   A.ok(/taintedBy: execution\.taintedBy\(\), origin: memcore\.originOf/.test(src), 'the run hands its taint marker to runReflection');
   const reflectStart = src.indexOf('async function runReflection(o)');
   const shortCircuit = src.indexOf('if (o && o.taintedBy) return;', reflectStart);

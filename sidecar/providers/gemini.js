@@ -16,8 +16,9 @@
   const RETRY_DELAYS = [400, 1200];
   const REWARM_MIN_MS = 5 * 60 * 1000;
 
+  const { cleanBaseUrl: lawfulBaseUrl } = require('../baseurl.js');   // ONE base-URL law: https, or http only to loopback, never user:pass@
   function cleanBaseUrl(value) {
-    return String(value || DEFAULT_BASE).trim().replace(/\/+$/, '');
+    return lawfulBaseUrl(value, DEFAULT_BASE);
   }
   function headerBag(key, accept) {
     const h = { 'Content-Type': 'application/json', 'Accept': accept || 'text/event-stream' };

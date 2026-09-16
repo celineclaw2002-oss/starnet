@@ -338,6 +338,7 @@ const DESKTOP_SHELL = /^(1|true|yes|on)$/i.test(String(ENV('DESKTOP_SHELL') || '
 // can pass the same token as ?token= on /api/file only; all other fetch-driven calls use the custom header.
 const apiauth = require('./apiauth.js');
 const { isReservedAgentId } = require('./agentid.js');   // respond.isAgentId already applies the reserved-name law; this names the reason
+const { baseUrlProblem } = require('./baseurl.js');   // ONE base-URL law: https, or http only to 127.0.0.1/localhost/[::1], never user:pass@
 const { isAllowedApiOrigin, isAllowedHost, requiresApiToken, TAURI_ORIGINS } = apiauth;
 function applyApiCors(req, res) {
   const origin = String(req.headers.origin || '');
@@ -2073,6 +2074,16 @@ function providerRuntimeKeyPool(provider, explicitPool) {
       ? runtimeKeyPools[id]
       : String(ENV('KEY_POOL_' + id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')) || '').split(','));
   return Array.from(new Set(source.map(k => String(k || '').trim()).filter(Boolean))).slice(0, 8);
+}
+// ONE base-URL law (sidecar/baseurl.js) at every boundary that accepts a provider endpoint or a channel service
+// URL: https://, or http:// only to 127.0.0.1 / localhost / [::1], never user:pass@. Answers 400 with the shared
+// message and returns true when the value is bad, so a route refuses BEFORE any provider or channel work.
+function refuseBadBaseUrl(res, raw, label) {
+  const problem = baseUrlProblem(raw, label);
+  if (!problem) return false;
+  res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({ ok: false, error: problem }));
+  return true;
 }
 function providerRuntimeBaseUrl(provider, explicitBaseUrl) {
   const id = normalizeProvider(provider);
@@ -10814,6 +10825,7 @@ async function handleSetKey(req, res) {
       }
     } catch (_) {}
   }
+  if (refuseBadBaseUrl(res, patch.baseUrl)) return;   // a saved endpoint feeds every later run silently; refuse a bad one at the door
   const id = setProviderRuntimeConfig(provider, patch);
   if (!id) { res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ error: 'unknown provider' })); }
   const key = providerRuntimeKey(id, '');
@@ -14781,6 +14793,7 @@ async function handleRun(req, res) {
   const usingCodex = providerUsesCodex(runProvider);   // Codex authenticates by OAuth token, not an API key
   // Desktop build: the key lives in runtimeKey (from the keychain, seeded via env at spawn and updatable
   // via /api/key). The browser build still sends body.key, which wins.
+  if (refuseBadBaseUrl(res, body && (body.baseUrl || body.base_url))) return;   // ONE base-URL law, before any provider work
   const baseUrl = providerRuntimeBaseUrl(runProvider, body && (body.baseUrl || body.base_url));
   const key = providerRuntimeKey(runProvider, body && body.key);
   if (!model || !providerHasCredential(runProvider, key, baseUrl)) { res.writeHead(400); return res.end('missing key/model'); }
@@ -18787,6 +18800,7 @@ async function handleChannelConnect(req, res) {
   // desktop: the token comes from the keychain/runtime layer, NOT the plaintext record; a fresh paste still wins.
   const token = channelToken('telegram', body.token, saved);
   const key = providerRuntimeKey(provider, String(body.key || '').trim() || String(saved.key || ''));
+  if (refuseBadBaseUrl(res, body.baseUrl || body.base_url)) return;   // ONE base-URL law (sidecar/baseurl.js): https, or http only to loopback, never user:pass@
   const baseUrl = providerRuntimeBaseUrl(provider, body.baseUrl || body.base_url || saved.baseUrl || saved.base_url || '');
   const model = String(body.model || '').trim() || String(saved.model || '');
   const reasoningEffort = resolveReasoningEffort(provider, body.reasoningEffort || body.reasoning_effort || saved.reasoningEffort);
@@ -18937,6 +18951,7 @@ async function handleTelegramBotAdd(req, res) {
   // channelRunConfigFor); desktop keychain/runtime credentials need not ride this request at all.
   const ident = agentRoster.get(agentId);
   if (!ident) return json(409, { error: 'that agent is not synchronized with the harness yet — reopen Messaging and try again' });
+  if (refuseBadBaseUrl(res, body.baseUrl || body.base_url)) return;   // ONE base-URL law (sidecar/baseurl.js): https, or http only to loopback, never user:pass@
   const runConfig = channelRunConfigFor(agentId, {
     provider: body.provider,
     key: String(body.key || '').trim(),
@@ -19077,6 +19092,7 @@ async function handleDiscordConnect(req, res) {
   // desktop: token from the keychain/runtime layer, not the plaintext record; a fresh paste still wins.
   const token = channelToken('discord', body.token, saved);
   const key = providerRuntimeKey(provider, String(body.key || '').trim() || String(saved.key || ''));
+  if (refuseBadBaseUrl(res, body.baseUrl || body.base_url)) return;   // ONE base-URL law (sidecar/baseurl.js): https, or http only to loopback, never user:pass@
   const baseUrl = providerRuntimeBaseUrl(provider, body.baseUrl || body.base_url || saved.baseUrl || saved.base_url || '');
   const model = String(body.model || '').trim() || String(saved.model || '');
   const reasoningEffort = resolveReasoningEffort(provider, body.reasoningEffort || body.reasoning_effort || saved.reasoningEffort);
@@ -19241,6 +19257,7 @@ async function handleGenericChannelConnect(req, res, id) {
   const provider = normalizeProvider(body.provider || saved.provider);
   const token = channelToken(id, body.token, saved);   // keychain/runtime (desktop) or plaintext record (bare); fresh paste wins
   const key = providerRuntimeKey(provider, String(body.key || '').trim() || String(saved.key || ''));
+  if (refuseBadBaseUrl(res, body.baseUrl || body.base_url)) return;   // ONE base-URL law (sidecar/baseurl.js): https, or http only to loopback, never user:pass@
   const baseUrl = providerRuntimeBaseUrl(provider, body.baseUrl || body.base_url || saved.baseUrl || saved.base_url || '');
   const model = String(body.model || '').trim() || String(saved.model || '');
   const reasoningEffort = resolveReasoningEffort(provider, body.reasoningEffort || body.reasoning_effort || saved.reasoningEffort);
@@ -19248,6 +19265,7 @@ async function handleGenericChannelConnect(req, res, id) {
   const system = (typeof body.system === 'string' && body.system) ? body.system : String(saved.system || '');
   const name = String(body.agentName || '').trim() || String(saved.name || '');
   const endpoint = String(body.endpoint || '').trim() || String(saved.endpoint || '');
+  if (id === 'matrix' && refuseBadBaseUrl(res, endpoint, 'homeserver URL')) return;   // the access token rides every homeserver request
   const account = String(body.account || '').trim() || String(saved.account || '');
   if (id === 'slack') {
     const t = parseSlackTokens(token);
@@ -19414,6 +19432,7 @@ async function handleProviderProbe(req, res) {
   const id = normalizeProvider(body.provider);
   const profile = getProviderProfile(id);
   if (!profile) return json({ provider: id, reachable: false, catalogAvailable: false, credentialVerified: false, error: 'unknown provider' });
+  if (refuseBadBaseUrl(res, body.baseUrl || body.base_url)) return;   // ONE base-URL law (sidecar/baseurl.js): https, or http only to loopback, never user:pass@
   try {
     const models = await listModelsForProvider(id, { key: String(body.key || ''), baseUrl: String(body.baseUrl || body.base_url || '') });
     // A catalog endpoint that does not require authentication proves reachability, not that a saved key can run.
@@ -19441,6 +19460,7 @@ async function handleProviderValidate(req, res) {
   const profile = getProviderProfile(id);
   if (!profile || providerUsesCodex(id) || providerUsesDeviceOAuth(id)) return json({ ok: false, provider: id, credentialVerified: false, error: 'this provider does not accept an API key' });
   const candidate = String(body.key || '').trim();
+  if (refuseBadBaseUrl(res, body.baseUrl || body.base_url)) return;   // ONE base-URL law (sidecar/baseurl.js): https, or http only to loopback, never user:pass@
   const baseUrl = providerRuntimeBaseUrl(id, body.baseUrl || body.base_url || '');
   if (providerRequiresKey(id) && !candidate) return json({ ok: false, provider: id, credentialVerified: false, error: 'a candidate key is required' });
   if (providerRequiresBaseUrl(id) && !baseUrl) return json({ ok: false, provider: id, credentialVerified: false, error: 'a base URL is required' });
@@ -19514,6 +19534,7 @@ async function handleProviderModels(req, res) {
   } catch (_) {}
   const id = normalizeProvider(providerId);
   if (!getProviderProfile(id)) return json(404, { models: [], error: 'unknown provider' });
+  if (refuseBadBaseUrl(res, baseUrl)) return;   // ONE base-URL law (sidecar/baseurl.js)
   try {
     const models = await listModelsForProvider(id, { baseUrl });
     json(200, { provider: id, models: models.map(publicModel) });

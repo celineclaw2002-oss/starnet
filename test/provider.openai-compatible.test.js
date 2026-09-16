@@ -95,7 +95,7 @@ module.exports = (async () => {
       ].join('\n');
       return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     const evs = await collect(p, { model: 'm', messages: [], tools: [{ type: 'function', function: { name: 'web_search' } }] });
     A.eq(evs.find(e => e.type === 'tool_start').name, 'web_search', 'tool_start carries name');
     A.eq(evs.filter(e => e.type === 'tool_args').map(e => e.chunk).join(''), '{"q":"x"}', 'tool args concatenate');
@@ -115,7 +115,7 @@ module.exports = (async () => {
       ].join('\n');
       return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     const evs = await collect(p, { model: 'm', messages: [], tools: [{ type: 'function', function: { name: 'fs_read' } }] });
     const starts = evs.filter(e => e.type === 'tool_start');
     A.eq(starts.length, 2, 'both index-less parallel calls start');
@@ -138,7 +138,7 @@ module.exports = (async () => {
       ].join('\n');
       return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     const evs = await collect(p, { model: 'm', messages: [], tools: [{ type: 'function', function: { name: 'web_search' } }] });
     A.eq(evs.filter(e => e.type === 'tool_start').length, 1, 'continuation chunk opens no phantom call');
     A.eq(evs.filter(e => e.type === 'tool_args').map(e => e.chunk).join(''), '{"q":"x"}', 'continuation args land on the same slot');
@@ -156,7 +156,7 @@ module.exports = (async () => {
       ].join('\n');
       return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     const evs = await collect(p, { model: 'm', messages: [], tools: [{ type: 'function', function: { name: 'fs_read' } }] });
     A.eq(evs.filter(e => e.type === 'tool_start').length, 1, 'a name-echoing continuation opens NO second call');
     A.eq(evs.filter(e => e.type === 'tool_args').map(e => e.chunk).join(''), '{"path":"a.txt"}', 'the args reassemble into one valid call');
@@ -173,7 +173,7 @@ module.exports = (async () => {
       ].join('\n');
       return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     const evs = await collect(p, { model: 'm', messages: [], tools: [{ type: 'function', function: { name: 'fs_read' } }] });
     const starts = evs.filter(e => e.type === 'tool_start');
     A.eq(starts.length, 2, 'complete-args same-name deltas are DISTINCT calls (never arg-concatenated)');
@@ -222,12 +222,12 @@ module.exports = (async () => {
       return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
     const onCalls = [];
-    const pOn = makeOpenAICompatibleProvider({ fetch: mkFetch(onCalls), baseUrl: 'http://local/v1' });
+    const pOn = makeOpenAICompatibleProvider({ fetch: mkFetch(onCalls), baseUrl: 'http://localhost/v1' });
     await collect(pOn, { model: 'm', messages: [] });
     A.eq(JSON.parse(onCalls[0].init.body).stream_options, { include_usage: true }, 'usage include defaults ON');
 
     const offCalls = [];
-    const pOff = makeOpenAICompatibleProvider({ fetch: mkFetch(offCalls), baseUrl: 'http://local/v1', includeUsage: false });
+    const pOff = makeOpenAICompatibleProvider({ fetch: mkFetch(offCalls), baseUrl: 'http://localhost/v1', includeUsage: false });
     await collect(pOff, { model: 'm', messages: [] });
     A.eq(JSON.parse(offCalls[0].init.body).stream_options, undefined, 'usage include opts out with explicit false');
   }
@@ -240,22 +240,22 @@ module.exports = (async () => {
       return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
     const hinted = [];
-    const pHint = makeOpenAICompatibleProvider({ fetch: mkFetch(hinted), baseUrl: 'http://local/v1', reasoningEffort: 'max', sendReasoningEffort: true });
+    const pHint = makeOpenAICompatibleProvider({ fetch: mkFetch(hinted), baseUrl: 'http://localhost/v1', reasoningEffort: 'max', sendReasoningEffort: true });
     await collect(pHint, { model: 'm', messages: [] });
     A.eq(JSON.parse(hinted[0].init.body).reasoning_effort, 'high', 'profile-hinted reasoning effort is sent, clamped to the wire scale');
 
     const perReq = [];
-    const pReq = makeOpenAICompatibleProvider({ fetch: mkFetch(perReq), baseUrl: 'http://local/v1', reasoningEffort: 'medium', sendReasoningEffort: true });
+    const pReq = makeOpenAICompatibleProvider({ fetch: mkFetch(perReq), baseUrl: 'http://localhost/v1', reasoningEffort: 'medium', sendReasoningEffort: true });
     await collect(pReq, { model: 'm', messages: [], reasoningEffort: 'low' });
     A.eq(JSON.parse(perReq[0].init.body).reasoning_effort, 'low', 'per-request effort overrides the instance default');
 
     const unhinted = [];
-    const pNo = makeOpenAICompatibleProvider({ fetch: mkFetch(unhinted), baseUrl: 'http://local/v1', reasoningEffort: 'medium' });
+    const pNo = makeOpenAICompatibleProvider({ fetch: mkFetch(unhinted), baseUrl: 'http://localhost/v1', reasoningEffort: 'medium' });
     await collect(pNo, { model: 'm', messages: [] });
     A.eq(JSON.parse(unhinted[0].init.body).reasoning_effort, undefined, 'no hint and no catalog proof -> reasoning_effort stays off the wire');
 
     const offCalls = [];
-    const pOff = makeOpenAICompatibleProvider({ fetch: mkFetch(offCalls), baseUrl: 'http://local/v1', reasoningEffort: 'none', sendReasoningEffort: true });
+    const pOff = makeOpenAICompatibleProvider({ fetch: mkFetch(offCalls), baseUrl: 'http://localhost/v1', reasoningEffort: 'none', sendReasoningEffort: true });
     await collect(pOff, { model: 'm', messages: [] });
     A.eq(JSON.parse(offCalls[0].init.body).reasoning_effort, undefined, 'effort none omits the param entirely');
   }
@@ -268,7 +268,7 @@ module.exports = (async () => {
       if (init && init.method === 'POST') return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
       return new Response(JSON.stringify({ data: [{ id: 'thinky', supportsReasoning: true }] }), { status: 200 });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1', reasoningEffort: 'medium' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1', reasoningEffort: 'medium' });
     await p.listModels();
     await collect(p, { model: 'thinky', messages: [] });
     const post = calls.find(c => c.init && c.init.method === 'POST');
@@ -288,7 +288,7 @@ module.exports = (async () => {
       }
       return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     await collect(p, { model: 'm', messages: [] });
     const posts = () => calls.filter(c => c.init && c.init.method === 'POST');   // catalog re-warm GETs interleave
     A.eq(posts().length, 2, 'rejected optional param retries once without it');
@@ -305,7 +305,7 @@ module.exports = (async () => {
       calls.push({ url, init });
       return new Response(JSON.stringify({ error: { message: 'tools is not supported' } }), { status: 400 });
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     let err = null;
     try { await collect(p, { model: 'm', messages: [], tools: [{ type: 'function', function: { name: 'x' } }] }); }
     catch (e) { err = e; }
@@ -320,12 +320,12 @@ module.exports = (async () => {
       if (init && init.method === 'POST') return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
       return new Response(JSON.stringify({ data: [{ id: 'tooly', supported_parameters: ['tools'] }, { id: 'bare' }] }), { status: 200 });
     };
-    const pDeny = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1', supportsTools: false });
+    const pDeny = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1', supportsTools: false });
     A.eq(pDeny.supportsTools('anything'), false, 'cold catalog falls back to the profile assertion');
     await pDeny.listModels();
     A.eq(pDeny.supportsTools('tooly'), true, 'catalog-declared tool support beats the profile fallback');
     A.eq(pDeny.supportsTools('bare'), false, 'catalog silence falls back to the profile assertion');
-    const pNull = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://local/v1' });
+    const pNull = makeOpenAICompatibleProvider({ fetch: fetchImpl, baseUrl: 'http://localhost/v1' });
     A.eq(pNull.supportsTools('anything'), null, 'no profile assertion stays honestly unknown');
   }
 
@@ -333,7 +333,7 @@ module.exports = (async () => {
   {
     const statics = [{ id: 'sonar', context_length: 128000, supportsTools: false, supportsReasoning: false }];
     const emptyFetch = async () => new Response(JSON.stringify({ data: [] }), { status: 200 });
-    const pEmpty = makeOpenAICompatibleProvider({ fetch: emptyFetch, baseUrl: 'http://api/v1', staticModels: statics });
+    const pEmpty = makeOpenAICompatibleProvider({ fetch: emptyFetch, baseUrl: 'http://localhost/v1', staticModels: statics });
     const fromStatic = await pEmpty.listModels();
     A.eq(fromStatic.length, 1, 'empty live catalog falls back to the static roster');
     A.eq(pEmpty.contextLimit('sonar'), 128000, 'static roster carries context limits (compaction works)');
@@ -341,7 +341,7 @@ module.exports = (async () => {
     A.eq(pEmpty.priceOf('sonar'), null, 'static roster stays honestly unpriced');
 
     const liveFetch = async () => new Response(JSON.stringify({ data: [{ id: 'real-model' }] }), { status: 200 });
-    const pLive = makeOpenAICompatibleProvider({ fetch: liveFetch, baseUrl: 'http://api/v1', staticModels: statics });
+    const pLive = makeOpenAICompatibleProvider({ fetch: liveFetch, baseUrl: 'http://localhost/v1', staticModels: statics });
     const fromLive = await pLive.listModels();
     A.eq(fromLive.map(m => m.id).join(','), 'real-model', 'a live catalog always wins over the static roster');
   }
@@ -360,7 +360,7 @@ module.exports = (async () => {
       if (!healthy) return { ok: false, status: 500, statusText: 'boom', json: async () => ({}), text: async () => '' };
       return { ok: true, status: 200, json: async () => ({ data: [{ id: 'gpt-x', context_length: 128000, pricing: { prompt: '0.000003', completion: '0.000015' } }] }) };
     };
-    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, key: 'k', baseUrl: 'http://api/v1', clock: { now: () => t } });
+    const p = makeOpenAICompatibleProvider({ fetch: fetchImpl, key: 'k', baseUrl: 'http://localhost/v1', clock: { now: () => t } });
     A.eq((await p.listModels()).length, 0, 'a failed boot probe yields an empty catalog');
     A.eq(p.contextLimit('gpt-x'), 0, 'and no context limit');
     A.eq(p.priceOf('gpt-x'), null, 'and no price — every turn would be unpriced');

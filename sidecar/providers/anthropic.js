@@ -128,8 +128,9 @@
     return best;
   }
 
+  const { cleanBaseUrl: lawfulBaseUrl } = require('../baseurl.js');   // ONE base-URL law: https, or http only to loopback, never user:pass@
   function cleanBaseUrl(value) {
-    return String(value || DEFAULT_BASE).trim().replace(/\/+$/, '');
+    return lawfulBaseUrl(value, DEFAULT_BASE);
   }
   function headerBag(key, accept) {
     const h = {

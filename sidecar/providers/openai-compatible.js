@@ -35,8 +35,9 @@
   // its runs — bearer credential and all — to OpenAI's API the moment the link failed to resolve, and the
   // user got OpenAI's "invalid model ID" for a catalog id that was never meant for that endpoint
   // (2026-08-25 stranded-user incident). An endpointless provider must refuse loudly, never reroute.
+  const { cleanBaseUrl: lawfulBaseUrl } = require('../baseurl.js');   // ONE base-URL law: https, or http only to loopback, never user:pass@
   function cleanBaseUrl(value) {
-    return String(value || '').trim().replace(/\/+$/, '');
+    return lawfulBaseUrl(value, '');   // still NO default endpoint; a bad explicit endpoint refuses loudly here, never reroutes
   }
   function cleanPath(value, fallback) {
     const path = String(value || fallback || '').trim();

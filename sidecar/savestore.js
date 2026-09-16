@@ -31,6 +31,7 @@
   const { note: failNote } = (typeof require === 'function') ? require('./failopen.js') : { note: function (tag, e) { console.warn('[failopen] ' + tag + ':', (e && e.message) || e); } };
 
   const AID_RE = /^[A-Za-z0-9_-]{1,40}$/;   // same agentId grammar as the notebook / fs jail / channels store
+  const { isReservedAgentId } = (typeof require === 'function') ? require('./agentid.js') : { isReservedAgentId: () => false };
 
   function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
@@ -50,7 +51,7 @@
 
     function ensureRoot() { try { if (fs.mkdirSync) fs.mkdirSync(rootDir, { recursive: true }); } catch (_) {} }
     function saveFile(agentId) {
-      if (!AID_RE.test(String(agentId))) throw new Error('bad save agentId: ' + agentId);
+      if (!AID_RE.test(String(agentId)) || isReservedAgentId(agentId)) throw new Error('bad save agentId: ' + agentId);
       return pathMod.join(rootDir, agentId + '.save.json');
     }
     // reads + parses a save file path, returning a TAGGED result so callers can tell a genuinely-absent file

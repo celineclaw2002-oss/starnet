@@ -229,6 +229,7 @@ test/threadstore.test.js
 test/autopilot-threads.test.js
 test/autopilot-focus.test.js
 test/apiauth.test.js
+test/agentid.test.js
 test/notebook.test.js
 test/skills.test.js
 test/skill-exchange.test.js

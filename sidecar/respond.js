@@ -20,9 +20,8 @@
 
 // The canonical agent-id shape (ID_RE across roster/cron/orchestration surfaces): a crafted id
 // must not be able to key outside its own workspace/checkpoint/grant lane.
-const AGENT_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
-
-function isAgentId(s) { return typeof s === 'string' && AGENT_ID_RE.test(s); }
+// Grammar AND the reserved sibling-directory names (codex, connectors, channels, ...) — see sidecar/agentid.js.
+const { AGENT_ID_RE, isAgentId } = require('./agentid.js');
 
 // One JSON answer, exactly like the inline closures it replaces: no-store (telemetry must never
 // cache-lie), and a silent no-op when headers already went out (e.g. readBody answered 413 first).

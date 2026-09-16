@@ -21,8 +21,9 @@
   const { fuzzyFindAndReplace } = require('./fuzzymatch.js');
   const crypto = require('node:crypto');
 
+  const { isAgentId } = require('../../agentid.js');   // grammar + the reserved sibling-dir names (codex, connectors, ...)
   function safeAgentId(id) {
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id || '')) throw new Error('bad agentId');
+    if (!isAgentId(id || '')) throw new Error('bad agentId');
     return id;
   }
   function kb(n) { return n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB'; }

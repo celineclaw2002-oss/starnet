@@ -337,6 +337,7 @@ const DESKTOP_SHELL = /^(1|true|yes|on)$/i.test(String(ENV('DESKTOP_SHELL') || '
 // the per-launch token (GET data routes included) except a small header-less set. Native media/file loads
 // can pass the same token as ?token= on /api/file only; all other fetch-driven calls use the custom header.
 const apiauth = require('./apiauth.js');
+const { isReservedAgentId } = require('./agentid.js');   // respond.isAgentId already applies the reserved-name law; this names the reason
 const { isAllowedApiOrigin, isAllowedHost, requiresApiToken, TAURI_ORIGINS } = apiauth;
 function applyApiCors(req, res) {
   const origin = String(req.headers.origin || '');
@@ -1457,7 +1458,7 @@ function replaceAgentRoster(list) {
   agentRosterRaw.clear();
   for (const a of (Array.isArray(list) ? list : [])) {
     const id = a && String(a.agentId || '');
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) continue;
+    if (!isAgentId(id)) continue;   // grammar + reserved names: an on-disk roster can't smuggle `codex` in either
     if (a && typeof a === 'object') agentRosterRaw.set(id, a);   // stash the raw record so unknown fields survive re-save
     const approvalMode = ((a && a.approvalMode) === 'full') ? 'full' : 'ask';
     agentRoster.set(id, {
@@ -1536,7 +1537,7 @@ function saveAgentRoster(updatedAt) {
 // of "full". Returns false without leaving an in-memory lie when the durable roster write cannot be proven.
 function persistAgentFullAccess(agentId) {
   const id = String(agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return false;
+  if (!isAgentId(id)) return false;
   const had = agentRoster.has(id);
   const previous = agentRoster.get(id);
   const base = previous || { system: '', name: id, model: null, provider: null, role: '', approvalMode: 'ask', executionProfile: 'station-gear', skills: [], reasoningEffort: null, track: '' };
@@ -1603,7 +1604,7 @@ initWorkspaceSchemaStamp();
 // sees it. Returns { ok, agentId, model, name, error } — truthful: ok:false when there is nothing to write to.
 function setAgentModelFromChannel(agentId, model) {
   const id = String(agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return { ok: false, agentId: id, error: 'bad agentId' };
+  if (!isAgentId(id)) return { ok: false, agentId: id, error: 'bad agentId' };
   const m = String(model == null ? '' : model).trim();
   if (!m) return { ok: false, agentId: id, error: 'empty model' };
   const cur = agentRoster.get(id);
@@ -4227,7 +4228,7 @@ function saveServiceKeyRemoval(nextKeys) {
 }
 function mcpStdioIsolationError(cfg) {
   const aid = String((cfg && cfg.agentId) || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(aid)) return 'mcp stdio requires a Safe Cell agent binding';
+  if (!isAgentId(aid)) return 'mcp stdio requires a Safe Cell agent binding';
   const owner = agentRoster.get(aid) || {};
   const isolated = executionEnvironment.forAgent(aid);
   if (owner.executionProfile !== 'safe-cell' || executionEnvironment.backendIdFor(aid) !== 'docker' || !isolated.supports || isolated.supports.hostileCodeSandbox !== true || isolated.supports.stdioMcp !== true) {
@@ -4418,7 +4419,7 @@ async function configureConnectorCfg(cfg, options) {
     // Preparing a persistent cell is asynchronous; the stdio transport itself remains synchronous/lazy.
     // Swallow readiness here only so the manager can record an honest connector error ("not ready") in
     // its public status instead of leaving a saved connector with no runtime row at all.
-    if (/^[A-Za-z0-9_-]{1,40}$/.test(aid) && executionEnvironment.backendIdFor(aid) === 'docker') {
+    if (isAgentId(aid) && executionEnvironment.backendIdFor(aid) === 'docker') {
       try { await executionEnvironment.ensureReady(aid); } catch (_) {}
     }
   }
@@ -11043,7 +11044,7 @@ async function handleConnectorUpsert(req, res) {
   ));
   if (transport === 'stdio') {
     const enabling = body.enabled !== false;
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId) || (enabling && !agentRoster.has(agentId))) {
+    if (!isAgentId(agentId) || (enabling && !agentRoster.has(agentId))) {
       return json(400, { ok: false, saved: false, connected: false, code: 'STDIO_AGENT_REQUIRED', error: 'choose an existing Safe Cell agent for this stdio server' });
     }
     const owner = agentRoster.get(agentId) || {};
@@ -12520,7 +12521,7 @@ async function validateWorkshopManifest(agentId, runId) {
 async function runWorkshopShift(agentId, opts) {
   const o = opts || {};
   const id = String(agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return { fired: false, reason: 'bad-agent' };
+  if (!isAgentId(id)) return { fired: false, reason: 'bad-agent' };
   // SHIFT HEALTH (2026-07-15 UX audit): every exit path records an honest lastShift outcome in the durable
   // store, so the away card can distinguish "waiting" from "broken" — the old behavior was total silence
   // (a keyless station no-op'd every 6h forever while the toggle read ON). Best-effort, never blocks the shift.
@@ -12713,7 +12714,7 @@ async function retireImplementedSource(agentId, sourceRunId, source, now) {
 async function runImplementBuild(agentId, sourceRunId, opts) {
   const o = opts || {};
   const id = String(agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return { fired: false, reason: 'bad-agent' };
+  if (!isAgentId(id)) return { fired: false, reason: 'bad-agent' };
   // only ever act on a disk-proven source deliverable (same law as decide) — never on the card's claim.
   const source = await validateWorkshopManifest(id, sourceRunId);
   if (!source) return { fired: false, reason: 'source-gone' };
@@ -13044,7 +13045,7 @@ async function handleWorkshopGrant(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { return json(400, { error: 'bad request' }); }
   const agentId = String(body.agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   const on = body.on === true || body.on === 'true';
   try { await workshopStore.setGrant(agentId, on); } catch (e) { return json(500, { error: 'could not save that setting' }); }
   try { if (on) await armWorkshopShift(agentId); else await disarmWorkshopShift(agentId); } catch (_) {}
@@ -13057,7 +13058,7 @@ async function handleWorkshopQueue(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad request' }); }
   const agentId = String(body.agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   const title = String(body.title || '').trim();
   if (!title && !String(body.detail || '').trim()) return json(400, { error: 'say what to build' });
   const item = { id: (body.id && /^[A-Za-z0-9_-]{1,64}$/.test(String(body.id))) ? String(body.id) : crypto.randomUUID(), title: title, detail: body.detail, source: (body.source === 'quest' ? 'quest' : 'queued') };
@@ -13305,7 +13306,7 @@ async function handleDeliverablesCleanupUndo(req, res) {
 async function handleWorkshopBacklog(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   const agentId = String((new URL(req.url, 'http://x')).searchParams.get('agent') || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   let rec; try { rec = workshopStore.read(agentId); } catch (e) { return json(500, { error: 'could not read the backlog' }); }
   // AWAY-CARD TRUTH (2026-07-15 UX audit): the queue was invisible — no state, no cadence, no health. Derive
   // each item's honest state from the stored record (never a synthesized status), and surface the shift's
@@ -13334,7 +13335,7 @@ async function handleWorkshopRemove(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 14)) || {}; } catch (e) { return json(400, { error: 'bad request' }); }
   const agentId = String(body.agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   let r; try { r = await workshopStore.remove(agentId, String(body.backlogId || '')); } catch (e) { return json(500, { error: 'could not update the queue' }); }
   if (r.removed) return json(200, { ok: true, removed: true });
   if (r.reason === 'built') return json(409, { ok: false, error: 'that one is already built — review it from its session (Implement / Discard) instead' });
@@ -13359,7 +13360,7 @@ function workshopBuiltAtOf(item) {
 async function handleWorkshopPending(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   const agentId = String((new URL(req.url, 'http://x')).searchParams.get('agent') || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   const rec = workshopStore.read(agentId);
   const out = [];
   for (const it of rec.backlog) {
@@ -13463,7 +13464,7 @@ async function handleWorkshopDecide(req, res) {
   const agentId = String(body.agentId || '');
   const runId = String(body.runId || '');
   const decision = String(body.decision || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   if (['keep', 'discard', 'later'].indexOf(decision) < 0) return json(400, { error: 'unknown decision' });
   const item = workshopStore.itemForRun(agentId, runId);
   const relDir = 'workshop/' + runId;
@@ -13577,7 +13578,7 @@ async function handleWorkshopUndo(req, res) {
   let body; try { body = JSON.parse(await readBody(req, 1 << 14)) || {}; } catch (e) { return json(400, { error: 'bad request' }); }
   const agentId = String(body.agentId || '');
   const runId = String(body.runId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'choose a valid agent' });
+  if (!isAgentId(agentId)) return json(400, { error: 'choose a valid agent' });
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(runId)) return json(400, { error: 'choose a valid run' });
   // GATE: only a genuinely KEPT deliverable can be undone. The lifecycle library is the durable proof a keep ran
   // (handleWorkshopDecide records a 'kept' row on every successful copy-out). No kept row → nothing to undo.
@@ -13661,7 +13662,7 @@ async function serveWorkshopRun(req, res) {
     if (slash <= 0) { res.writeHead(404); return res.end('not found'); }
     const agentId = tail.slice(0, slash);
     const rel = tail.slice(slash + 1);                                 // <runId>/<path...>
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) { res.writeHead(403); return res.end('forbidden'); }
+    if (!isAgentId(agentId)) { res.writeHead(403); return res.end('forbidden'); }
     if (!rel || rel.slice(-1) === '/') { res.writeHead(404); return res.end('not found'); }   // no dir/trailing-slash
     ({ abs } = await fsJail.resolveInside(agentId, 'workshop/' + rel));  // throws on '..'/absolute/symlink/bad agentId
   } catch (e) {
@@ -13705,7 +13706,7 @@ async function handleWorkshopOpen(req, res) {
 async function handleWorkshopShiftNow(req, res) {
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { res.writeHead(400); return res.end('bad json'); }
   const agentId = String(body.agentId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'choose a valid agent' })); }
+  if (!isAgentId(agentId)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'choose a valid agent' })); }
   res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
   const kaOff = attachStreamKeepAlive(res);   // hold-open heartbeat (mirrors /api/run): shifts run whole tool phases silently
   const bus = { emit: (name, payload) => { try { res.write(JSON.stringify({ name, payload: redact(payload) }) + '\n'); } catch (_) {} } };
@@ -13727,7 +13728,7 @@ async function handleWorkshopImplement(req, res) {
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { res.writeHead(400); return res.end('bad json'); }
   const agentId = String(body.agentId || '');
   const runId = String(body.runId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'choose a valid agent' })); }
+  if (!isAgentId(agentId)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'choose a valid agent' })); }
   if (!runId) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'no deliverable named' })); }
   res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
   const kaOff = attachStreamKeepAlive(res);
@@ -13932,7 +13933,7 @@ async function handleCheckpointRestore(req, res) {
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || '');
   const snapshotId = String(body.snapshotId || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'bad agentId' });
+  if (!isAgentId(agentId)) return json(400, { error: 'bad agentId' });
   const remoteEnv = executionEnvironment.backendIdFor(agentId) === 'ssh' ? executionEnvironment.forAgent(agentId) : null;
   if (remoteEnv ? !/^sshcp_[a-f0-9]{8}$/.test(snapshotId) : !checkpointStore.isValidId(snapshotId)) return json(400, { error: 'bad snapshotId' });
   const operationId = 'restore-' + crypto.randomUUID();
@@ -13953,7 +13954,7 @@ async function handleCheckpointList(req, res) {
   try {
     const u = new URL(req.url, 'http://127.0.0.1');
     const agent = u.searchParams.get('agent') || 'agent';
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(400, { error: 'bad agentId' });
+    if (!isAgentId(agent)) return json(400, { error: 'bad agentId' });
     const remoteEnv = executionEnvironment.backendIdFor(agent) === 'ssh' ? executionEnvironment.forAgent(agent) : null;
     const snapshots = remoteEnv && typeof remoteEnv.listCheckpoints === 'function' ? await remoteEnv.listCheckpoints(agent) : checkpointStore.list(agent).snapshots;
     json(200, { enabled: remoteEnv ? true : CHECKPOINTS_ENABLED, snapshots });
@@ -14020,6 +14021,8 @@ async function handleRoster(req, res) {
     // agentId must be a real, non-coerced string id (the numeric-to-string coercion class the QA flagged:
     // a numeric agentId would previously coerce through String() and pass the id regex silently).
     if (typeof a.agentId !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(a.agentId)) return json(400, { error: 'each agent needs a valid string agentId' });
+    // RESERVED (sidecar/agentid.js): the id would be jailed inside a station directory (codex/ tokens, connectors/, ...).
+    if (isReservedAgentId(a.agentId)) return json(400, { error: 'agentId "' + a.agentId + '" is reserved: it names a station directory under the workspace root' });
   }
   // P1.1 anti-clobber (mirrors savestore.js:145-171): if the pusher stamped a freshness `updatedAt` and it is
   // OLDER than what we last accepted, refuse — a stale background tab / out-of-sync frontend can no longer legally
@@ -14061,7 +14064,7 @@ async function handleAgentDelete(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || body.agent || '');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'invalid agentId' });   // same id regex as roster/fs-jail surfaces
+  if (!isAgentId(agentId)) return json(400, { error: 'invalid agentId' });   // same id law as roster/fs-jail surfaces (grammar + reserved names)
   if (agentId === 'agent') return json(400, { error: 'cannot delete the hero agent' });   // the founder is undeletable (resume depends on it)
 
   const deletion = await agentLifecycle.beginDelete(agentId, 'delete-' + crypto.randomUUID());
@@ -14420,7 +14423,7 @@ async function runSlashRoutine(line, opts) {
 
 async function runSlashForChannel(input, ctx) {
   ctx = ctx || {};
-  const agentId = /^[A-Za-z0-9_-]{1,40}$/.test(String(ctx.agentId || '')) ? String(ctx.agentId) : 'agent';
+  const agentId = isAgentId(String(ctx.agentId || '')) ? String(ctx.agentId) : 'agent';
   let placed = [];
   try {
     const st = router.stationFor(agentId);
@@ -14473,7 +14476,7 @@ async function handleSlashDispatch(req, res) {
     // `placed` rides the ctx too: /tools answers "what can THIS agent call", which depends on the props on its
     // floor — the browser is the only one that knows the live floor, so it must travel with the dispatch.
     const ctx = {
-      agentId: /^[A-Za-z0-9_-]{1,40}$/.test(String(body.agentId || '')) ? String(body.agentId) : 'agent',
+      agentId: isAgentId(String(body.agentId || '')) ? String(body.agentId) : 'agent',
       placed: placed
     };
     const r = await slashActions.run(out.directive.action, out.directive.args, ctx);
@@ -14623,7 +14626,7 @@ function serveSkillGoldens(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let u; try { u = new URL(req.url, 'http://x'); } catch (_) { return json(400, { error: 'bad url' }); }
   const agentId = String(u.searchParams.get('agent') || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const id = String(u.searchParams.get('id') || '').trim();
   if (id) return json(200, { agentId, skillId: id, goldens: goldensFor(agentId, id) });
   const out = {};
@@ -14635,7 +14638,7 @@ function serveAgentSkills(req, res) {
   try {
     const u = new URL(req.url, 'http://127.0.0.1');
     const agentId = u.searchParams.get('agent') || 'agent';
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+    if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
     const includeArchived = u.searchParams.get('archived') === '1' || u.searchParams.get('state') === 'all';
     const includeBody = u.searchParams.get('body') === '1';
     let skills = skillStore.list(agentId, { includeArchived });
@@ -14659,7 +14662,7 @@ async function handleAgentSkillManage(req, res) {
   const json = (code, obj) => { if (res.headersSent) return; res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 20, res)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const r = skillStore.manage(Object.assign({}, body, { agentId, createdBy: 'user' }));
   if (!r.ok) return json(400, { error: r.error || 'could not update skill' });
   chanEmit('deliverable', { id: r.skill.id, agentId, kind: 'skill', title: r.skill.name });
@@ -14675,7 +14678,7 @@ async function handleAgentSkillAllow(req, res) {
   const json = (code, obj) => { if (res.headersSent) return; res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16, res)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const id = String(body.id || body.target || '').trim();
   if (!id) return json(400, { error: 'which skill?' });
   const skill = skillStore.view(agentId, id, { includeArchived: true, bump: false });
@@ -14708,6 +14711,9 @@ async function handleRun(req, res) {
   try { body = JSON.parse(await readBody(req, 2 << 20, res)); }
   catch (e) { if (res.headersSent) return; res.writeHead(400); return res.end('bad json'); }   // over-limit already answered 413
   const { model, system, messages = [], agentId = 'agent', isTask = false, provider, fallbackModels, fallbackProviders } = body || {};
+  // ONE id law (sidecar/agentid.js): the grammar, and never a reserved station directory (codex, connectors, ...) —
+  // refused here, before any provider or tool work, rather than lazily by the fs jail mid-run.
+  if (!isAgentId(String(agentId))) { res.writeHead(400); return res.end('bad agentId'); }
   const recurring = !!(body && body.recurring);   // the browser's mint detector saw this task SHAPE before → salience boost for reflection
   // REASON-ONLY SELF-TALK (retitle / goal-judge / pitch / autopilot): the caller composed a complete strict-format
   // prompt and parses the raw reply. runOnce keeps that system prompt VERBATIM (no manual/capability/skill/memory
@@ -15471,7 +15477,7 @@ async function runOnce(o) {
     fsp, pathMod: path, root: WORKSPACES,
     // Chrome's profile lives in OS.tmpdir(), OUTSIDE the workspace jail, so anything the agent
     // downloaded landed somewhere it could never read back. Point downloads at its own folder.
-    downloadDir: /^[A-Za-z0-9_-]{1,40}$/.test(String(agentId || '')) ? path.join(WORKSPACES, String(agentId), 'downloads') : null,
+    downloadDir: isAgentId(String(agentId || '')) ? path.join(WORKSPACES, String(agentId), 'downloads') : null,
     // Host authority, not model args: every normal run is headless and all page input locks
     // are emulated before navigation. The browser.test_* workbench tools are the sanctioned
     // localhost/game path and dispatch only CDP/page events.
@@ -17967,7 +17973,7 @@ async function handleAutonomyWrite(req, res) {
   // agentId keys the workspace jail + checkpoint store + persisted roster posture; validate it to the same
   // shape every sibling route enforces so a crafted id can't reach outside its lane (defense in depth on top of
   // the fs-jail resolveInside below). Matches ID_RE used across the roster/cron/orchestration surfaces.
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return sendJson(400, { ok: false, reason: 'invalid agentId' });
+  if (!isAgentId(agentId)) return sendJson(400, { ok: false, reason: 'invalid agentId' });
   const rel = body.path, content = body.content;
   if (typeof rel !== 'string' || !rel || typeof content !== 'string') return sendJson(400, { ok: false, reason: 'missing path or content' });
   // a one-off registry carrying the cabinet (fs) tools — assembled exactly like runOnce (same makeFsTools args).
@@ -18134,7 +18140,7 @@ function nightFocusView() {
 async function handleNightshiftBeatNow(req, res) {
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { res.writeHead(400); return res.end('bad json'); }
   const agentId = String(body.agentId || NIGHTSHIFT_AGENT);
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'choose a valid agent' })); }
+  if (!isAgentId(agentId)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'choose a valid agent' })); }
   res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
   const bus = { emit: (name, payload) => { try { res.write(JSON.stringify({ name, payload: redact(payload) }) + '\n'); } catch (_) {} } };
   const emit = wrapEmitDiag(makeEmitter(bus, e => { if (e) console.warn('[event]', e.kind, e.event, (e.errors || []).join(';')); }));
@@ -18313,7 +18319,7 @@ async function handleSummonAck(req, res) {
   try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { res.writeHead(400); return res.end('bad json'); }
   const pend = pendingSummonByRun.get(body.runId);
   const finish = pend && pend.get(body.requestId);
-  const newId = (body.agentId != null && /^[A-Za-z0-9_-]{1,40}$/.test(String(body.agentId))) ? String(body.agentId) : null;
+  const newId = (body.agentId != null && isAgentId(String(body.agentId))) ? String(body.agentId) : null;
   if (finish) finish(newId, newId ? String(body.desk == null ? '' : body.desk).replace(/[\r\n]+/g, ' ').trim().slice(0, 60) : '');
   res.writeHead(200); res.end('ok');
 }
@@ -19797,7 +19803,7 @@ function serveNotebook(req, res) {
   try {
     const u = new URL(req.url, 'http://127.0.0.1');
     const agent = u.searchParams.get('agent') || 'agent';
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(403, { error: 'forbidden' });
+    if (!isAgentId(agent)) return json(403, { error: 'forbidden' });
     const r = notebookStore.readKey('notebook:' + agent);
     const bad = storeFailure(r);
     if (bad) return json(500, bad);
@@ -19817,7 +19823,7 @@ async function handleNotebookRestore(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 8 << 20)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agent = String(body.agent || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(400, { error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
+  if (!isAgentId(agent)) return json(400, { error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
   const incoming = Array.isArray(body.notes) ? body.notes : [];
   try {
     // P1: merge under the per-agent lock, re-reading existing so a concurrent run's memory.write isn't lost.
@@ -19840,7 +19846,7 @@ function serveSaveLoad(req, res) {
   try {
     const u = new URL(req.url, 'http://127.0.0.1');
     const agent = u.searchParams.get('agent') || 'agent';
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(403, { error: 'forbidden' });
+    if (!isAgentId(agent)) return json(403, { error: 'forbidden' });
     const doc = saveStore.load(agent);   // NOTE: this read is what quarantines a corrupt main / recovers .bak — run it BEFORE reading the marker
     // EL-11 FIX 2/3: surface the persisted quarantine/recovery marker (savestore writeRecoveryMarker) so the boot
     // path can disclose a damaged/restored save instead of silently presenting the pristine first-run ceremony.
@@ -19855,7 +19861,7 @@ async function handleSaveRecoveryAck(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agent = String(body.agent || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(400, { error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
+  if (!isAgentId(agent)) return json(400, { error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
   try { json(200, { ok: true, cleared: !!saveStore.clearRecoveryNotice(agent) }); }
   catch (e) { json(200, { ok: false, error: (e && e.message) || 'ack failed' }); }
 }
@@ -19872,7 +19878,7 @@ async function handleSaveWrite(req, res) {
   // the record key is the agent's OWN id — body.agent is the agent OBJECT ({id,name,...}), not a selector
   // string, so derive from body.agent.id (an explicit body.agentId wins if a future caller sends one).
   const agentId = String(body.agentId || (body.agent && body.agent.id) || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
+  if (!isAgentId(agentId)) return json(400, { error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
   // P2.1: DEGRADED — refuse a save write when this workspace was stamped by a NEWER StarNet (writing a newer save
   // envelope shape through older code risks silent field loss). Reads (GET /api/save) still serve; runs continue.
   if (workspaceDegraded) return json(200, { ok: false, error: 'workspace written by newer StarNet', degraded: true });
@@ -20470,7 +20476,7 @@ async function handleStudyResolve(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const runId = String(body.runId || '');
   const id = String(body.id || '');
   // mirror the browser's studyDeclined denylist (capped, strings only) — runStudy() feeds it into the engine dedup.
@@ -20552,7 +20558,7 @@ async function handleThreadTurnin(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const runId = String(body.runId || '');
   const id = String(body.id || '');
   const verdict = String(body.verdict || '');
@@ -20661,7 +20667,7 @@ async function handleMemoryTurnin(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const runId = String(body.runId || '');
   const id = String(body.id || '');
   const verdict = String(body.verdict || '');
@@ -20743,7 +20749,7 @@ async function handleMemoryReset(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agent || body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   await resetAgentMemory(notebookStore, agentId);   // wipe notebook:/declined:/todo: (pure helper — unit-tested)
   // also drop any in-memory pending proposals for this agent so a stale turn-in can't land on the new hero
   for (const [rid, b] of proposalsByRun) { if (b && b.agentId === agentId) proposalsByRun.delete(rid); }
@@ -20764,7 +20770,7 @@ function serveMemoryRecords(req, res) {
   try {
     const u = new URL(req.url, 'http://127.0.0.1');
     const agent = u.searchParams.get('agent') || 'agent';
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(403, { error: 'forbidden' });
+    if (!isAgentId(agent)) return json(403, { error: 'forbidden' });
     const rk = notebookStore.readKey('notebook:' + agent);
     const bad = storeFailure(rk);
     if (bad) return json(500, bad);
@@ -20804,7 +20810,7 @@ function serveDeclined(req, res) {
   try {
     const u = new URL(req.url, 'http://127.0.0.1');
     const agent = u.searchParams.get('agent') || 'agent';
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(agent)) return json(403, { error: 'forbidden' });
+    if (!isAgentId(agent)) return json(403, { error: 'forbidden' });
     const rk = notebookStore.readKey('declined:' + agent);
     const bad = storeFailure(rk);
     if (bad) return json(500, bad);
@@ -20821,7 +20827,7 @@ async function handleDeclinedRestore(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || body.agent || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   const text = String(body.text || '').trim();
   if (!text) return json(400, { error: 'text required' });
   const removed = await restoreDeclined(notebookStore, agentId, text);
@@ -20836,7 +20842,7 @@ async function handleMemoryMutate(req, res, op) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
   const agentId = String(body.agentId || 'agent');
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(403, { error: 'forbidden' });
+  if (!isAgentId(agentId)) return json(403, { error: 'forbidden' });
   if (!String(body.id || '')) return json(400, { error: 'id required' });
   const key = 'notebook:' + agentId;
   // P1: apply the pure memcore op under the per-agent lock, RE-READING the list so a concurrent run's

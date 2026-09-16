@@ -21,6 +21,8 @@
   else { (root.SK = root.SK || {}).configexport = api; }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
+  // the id law (grammar + reserved station-directory names); the browser fallback keeps the bare grammar.
+  const { isAgentId } = (typeof require === 'function') ? require('./agentid.js') : { isAgentId: (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(id) };
 
   const SCHEMA = 1;
   const MAX_CONNECTOR_ARGS = 128;
@@ -232,7 +234,7 @@
         model: a.model ? clampStr(a.model, 200) : null,
         provider: a.provider ? clampStr(a.provider, 40) : null,
         role: clampStr(a.role, 120)
-      } : null).filter(a => a && /^[A-Za-z0-9_-]{1,40}$/.test(a.agentId));
+      } : null).filter(a => a && isAgentId(a.agentId));   // grammar + reserved names (sidecar/agentid.js)
     }
     if (isObj(inSec.dossier)) out.dossier = { block: clampStr(inSec.dossier.block, 4096) };
     if (isObj(inSec.permissions) && Array.isArray(inSec.permissions.allow)) {

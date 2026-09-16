@@ -22,6 +22,7 @@
 
 const { makeDurableJsonStore } = require('./durable-store.js');
 
+const { isReservedAgentId } = require('./agentid.js');
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const DENYLIST_CAP = 500;   // FIFO cap on the permanent discarded-backlogId list (per agent)
 const BACKLOG_CAP = 200;    // FIFO cap on queued items (oldest un-built drop off if the queue floods)
@@ -29,7 +30,7 @@ const MAX_BUILD_ATTEMPTS = 2;   // failed builds per item before it PARKS (never
 
 function agentIdOf(key) {
   const raw = String(key || '').replace(/^workshop:/, '') || 'agent';
-  if (!ID_RE.test(raw)) throw new Error('bad workshop agentId');
+  if (!ID_RE.test(raw) || isReservedAgentId(raw)) throw new Error('bad workshop agentId');
   return raw;
 }
 
